@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model Consultation {
+  id        Int       @id @default(autoincrement())
+  title     String
+  slug      String    @unique
+  summary   String
+  imageUrl  String?
+  duration  Int?
+  bookable  Boolean   @default(true)
+  unavailableText String? @db.Text
+  customerFields String? @default("name,email")
+  price     Int
+  focus     String
+  badge     String
+  featured  Boolean   @default(false)
+  sortOrder Int       @default(0)
+  bookingDaysAhead Int @default(14)
+  allowSameDayBooking Boolean @default(true)
+  slotDurationMinutes Int @default(60)
+  bookingBufferMinutes Int @default(0)
+  disabledWeekdays String?
+  allowedMonths String?
+  disabledMonthDays String?
+  disabledDaysByMonth String? @db.Text
+  disableFrenchHolidays Boolean @default(false)
+  createdAt DateTime  @default(now())
+  bookings  Booking[]
+}
+
+model Booking {
+  id             Int          @id @default(autoincrement())
+  name           String?
+  firstName      String?
+  email          String?
+  phone          String?
+  message        String?
+  preferredDate  DateTime?
+  paymentStatus  String       @default("pending")
+  orderStatus    String       @default("new")
+  stripeSessionId String?      @unique
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  consultationId Int
+  createdAt      DateTime     @default(now())
+}

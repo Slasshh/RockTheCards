@@ -1,0 +1,19 @@
+<svg width="1200" height="820" viewBox="0 0 1200 820" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="820" rx="36" fill="#75C7E7"/>
+  <path d="M134 606C282 722 509 748 720 692C887 648 1020 546 1072 412" stroke="#BCE8F5" stroke-width="84" stroke-linecap="round"/>
+  <path d="M178 184C312 86 508 62 688 106C846 144 970 236 1034 358" stroke="#BCE8F5" stroke-width="64" stroke-linecap="round"/>
+  <circle cx="600" cy="410" r="230" fill="#BCE8F5" stroke="#F4F8FB" stroke-width="12"/>
+  <rect x="269" y="278" width="188" height="292" rx="24" fill="#F4F8FB" stroke="#182B49" stroke-width="5" transform="rotate(-18 269 278)"/>
+  <rect x="506" y="218" width="188" height="292" rx="24" fill="#F4F8FB" stroke="#182B49" stroke-width="5"/>
+  <rect x="753" y="220" width="188" height="292" rx="24" fill="#F4F8FB" stroke="#182B49" stroke-width="5" transform="rotate(18 753 220)"/>
+  <path d="M363 365L380 419L437 419L391 452L409 506L363 473L317 506L335 452L289 419L346 419L363 365Z" fill="#FFD35A"/>
+  <path d="M600 301L620 365L687 365L633 405L654 469L600 429L546 469L567 405L513 365L580 365L600 301Z" fill="#FFD35A"/>
+  <path d="M843 365L860 419L917 419L871 452L889 506L843 473L797 506L815 452L769 419L826 419L843 365Z" fill="#FFD35A"/>
+  <path d="M156 232L168 270L208 270L176 293L188 331L156 308L124 331L136 293L104 270L144 270L156 232Z" fill="#FFD35A"/>
+  <path d="M1029 170L1041 208L1081 208L1049 231L1061 269L1029 246L997 269L1009 231L977 208L1017 208L1029 170Z" fill="#FFD35A"/>
+  <path d="M1062 579L1074 617L1114 617L1082 640L1094 678L1062 655L1030 678L1042 640L1010 617L1050 617L1062 579Z" fill="#FFD35A"/>
+  <path d="M188 641L200 679L240 679L208 702L220 740L188 717L156 740L168 702L136 679L176 679L188 641Z" fill="#FFD35A"/>
+  <rect x="440" y="640" width="320" height="22" rx="11" fill="#182B49" opacity="0.18"/>
+  <path d="M480 162C520 132 564 117 612 117C668 117 718 138 762 181" stroke="#182B49" stroke-width="6" stroke-linecap="round" opacity="0.35"/>
+  <path d="M419 641C475 681 535 701 600 701C673 701 738 678 795 633" stroke="#182B49" stroke-width="6" stroke-linecap="round" opacity="0.35"/>
+</svg>

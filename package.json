@@ -2,16 +2,30 @@
   "name": "rocktheards",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "prisma:generate": "prisma generate"
   },
   "dependencies": {
+    "@prisma/adapter-mariadb": "7.8.0",
+    "@prisma/client": "7.8.0",
+    "dotenv": "^17.2.3",
     "next": "16.2.6",
+    "next-auth": "^4.24.14",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "stripe": "^22.1.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -20,6 +34,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "prisma": "7.8.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
@@ -28,6 +43,9 @@
     "unrs-resolver"
   ],
   "trustedDependencies": [
+    "@prisma/client",
+    "@prisma/engines",
+    "prisma",
     "sharp",
     "unrs-resolver"
   ]
