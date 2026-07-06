@@ -46,7 +46,7 @@ const consultations = [
     imageUrl: "/card-spread.svg",
     duration: 50,
     price: 75,
-    focus: "Carrière, mission, transition",
+    focus: "Carriere, mission, transition",
     badge: "Pro",
     featured: false,
     sortOrder: 3,
