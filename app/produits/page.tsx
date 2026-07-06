@@ -103,9 +103,6 @@ export default async function ProduitsPage() {
                     <p className="mt-4 flex-1 text-sm leading-6 text-[#425D78]">
                       {consultation.summary}
                     </p>
-                    <p className="mt-6 border-t border-[#75C7E7]/45 pt-5 text-sm font-semibold leading-6 text-[#182B49]">
-                      {consultation.focus}
-                    </p>
                     <div className="mt-6 flex items-center justify-between">
                       <span className="text-3xl font-bold text-[#182B49]">
                         {consultation.price}€
