@@ -115,11 +115,23 @@ export async function POST(request: Request) {
       try {
         const result = await prisma.$transaction(async (tx) => {
           const existingBooking = await tx.booking.findUnique({
+            include: {
+              consultation: {
+                select: {
+                  price: true,
+                  title: true,
+                },
+              },
+            },
             where: { stripeSessionId: session.id },
           });
 
           if (existingBooking) {
-            return null;
+            return {
+              alreadyPaidSlot: existingBooking.orderStatus === "cancelled",
+              booking: existingBooking,
+              consultation: existingBooking.consultation,
+            };
           }
 
           const consultation = await tx.consultation.findUnique({

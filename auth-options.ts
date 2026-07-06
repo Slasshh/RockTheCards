@@ -1,6 +1,15 @@
 import type { NextAuthOptions } from "next-auth";
 import DiscordProvider from "next-auth/providers/discord";
 
+function getDiscordAdminIds() {
+  return new Set(
+    (process.env.DISCORD_ADMIN_ID ?? "")
+      .split(",")
+      .map((adminId) => adminId.trim())
+      .filter(Boolean),
+  );
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     DiscordProvider({
@@ -27,8 +36,9 @@ export const authOptions: NextAuthOptions = {
 
       if (session.user) {
         session.user.id = discordId;
-        session.user.isAdmin =
-          Boolean(discordId) && discordId === process.env.DISCORD_ADMIN_ID;
+        session.user.isAdmin = discordId
+          ? getDiscordAdminIds().has(discordId)
+          : false;
       }
 
       return session;

@@ -127,7 +127,7 @@ export async function sendOrderDiscordLog(payload: OrderWebhookPayload) {
   }));
 
   for (let index = 0; index < embeds.length; index += 10) {
-    await fetch(webhookUrl, {
+    const response = await fetch(webhookUrl, {
       body: JSON.stringify({
         allowed_mentions: { parse: [] },
         embeds: embeds.slice(index, index + 10),
@@ -135,6 +135,10 @@ export async function sendOrderDiscordLog(payload: OrderWebhookPayload) {
       }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
-    }).catch(() => undefined);
+    });
+
+    if (!response.ok) {
+      throw new Error(`Discord webhook failed with status ${response.status}.`);
+    }
   }
 }
