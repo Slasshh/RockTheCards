@@ -4,7 +4,7 @@ WORKDIR /usr/src/app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
+ENV PORT=3030
 
 COPY package.json bun.lock prisma.config.ts ./
 COPY prisma/ ./prisma/
@@ -33,6 +33,6 @@ RUN DATABASE_URL="mysql://user:password@127.0.0.1:3306/rockthecards" \
 
 ENV NODE_ENV=production
 
-EXPOSE 3000
+EXPOSE 3030
 
 CMD ["sh", "-c", "bun --env-file=.env.production run start"]

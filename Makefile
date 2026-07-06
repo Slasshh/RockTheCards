@@ -5,7 +5,7 @@ CONTAINER_NAME ?= rockthecards
 APP_LABEL ?= fr.slimelab.service=rockthecards
 IMAGE_LABEL ?= fr.slimelab.image=$(IMAGE_NAME)
 ENV_FILE ?= .env.production
-PORT ?= 3000
+PORT ?= 3030
 
 .PHONY: build clean clean-containers clean-images clean-dangling rebuild run restart stop logs shell ps inspect lint typecheck next-build prisma-generate prisma-push prisma-push-production prisma-deploy start start-production
 
