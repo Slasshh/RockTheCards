@@ -32,10 +32,6 @@ const initialState = {
   message: "",
 };
 
-function formatProductFocus(focus: string) {
-  return focus.replaceAll("Carrière", "Carriere");
-}
-
 export default function BookingProducts({
   bookedSlots,
   consultations,
@@ -91,9 +87,6 @@ export default function BookingProducts({
               </h3>
               <p className="mt-4 flex-1 text-sm leading-6 text-[#182B49]">
                 {consultation.summary}
-              </p>
-              <p className="mt-6 border-t border-[#75C7E7] pt-5 text-sm font-semibold text-[#182B49]">
-                {formatProductFocus(consultation.focus)}
               </p>
               <div className="mt-6 flex items-center justify-between">
                 <p className="text-3xl font-bold">{consultation.price} EUR</p>
