@@ -2,6 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import type { CSSProperties } from "react";
 import HomeNavbar from "@/app/home-navbar";
+import { formatProductBadge } from "@/lib/product-labels";
 import { prisma } from "@/lib/prisma";
 
 export default async function ProduitsPage() {
@@ -85,7 +86,7 @@ export default async function ProduitsPage() {
                       }}
                     />
                     <span className="products-card-badge">
-                      {consultation.badge}
+                      {formatProductBadge(consultation.badge)}
                     </span>
                   </div>
                   <div className="flex flex-1 flex-col p-6">

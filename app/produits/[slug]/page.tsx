@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { createBooking } from "@/app/actions";
 import HomeNavbar from "@/app/home-navbar";
 import ProductBookingForm from "@/app/product-booking-form";
+import { formatProductBadge } from "@/lib/product-labels";
 import { prisma } from "@/lib/prisma";
 
 function toDateTimeLocalValue(date: Date) {
@@ -85,7 +86,7 @@ export default async function ProductPage({
               Retour aux produits
             </Link>
             <p className="mt-10 text-sm font-extrabold uppercase tracking-[0.28em] text-[#75C7E7]">
-              {consultation.badge}
+              {formatProductBadge(consultation.badge)}
             </p>
             <h1 className="mt-5 max-w-3xl text-5xl font-black leading-[1.04] text-[#F4F8FB] md:text-7xl">
               {consultation.title}

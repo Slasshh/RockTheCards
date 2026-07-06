@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
+import { formatProductBadge } from "@/lib/product-labels";
 import DatePicker, { getSelectedHour } from "./date-picker";
 
 type ConsultationProduct = {
@@ -74,7 +75,7 @@ export default function BookingProducts({
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="rounded-full bg-[#182B49] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#FFD35A]">
-                  {consultation.badge}
+                  {formatProductBadge(consultation.badge)}
                 </span>
                 {consultation.duration ? (
                   <span className="text-sm font-semibold text-[#182B49]">

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { formatProductBadge } from "@/lib/product-labels";
 
 type AdminProduct = {
   allowSameDayBooking: boolean;
@@ -341,7 +342,7 @@ function ProductsPanel({
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="rounded-full bg-[#182B49] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#FFD35A]">
-                  {product.badge}
+                  {formatProductBadge(product.badge)}
                 </span>
                 <span className="text-sm font-semibold text-[#182B49]">
                   {product._count.bookings} réservations

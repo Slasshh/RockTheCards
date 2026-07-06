@@ -11,7 +11,7 @@ model Consultation {
   id        Int       @id @default(autoincrement())
   title     String
   slug      String    @unique
-  summary   String
+  summary   String    @db.Text
   imageUrl  String?
   duration  Int?
   bookable  Boolean   @default(true)
