@@ -31,21 +31,19 @@ export default async function ProduitsPage() {
           <div className="max-w-2xl lg:justify-self-end">
             <p className="text-lg leading-8 text-[#BCE8F5]">
               Chaque guidance précise son intention, sa durée et ce qu&apos;elle
-              peut t&apos;apporter. Ouvre une fiche pour poser ton message et
-              réserver un créneau disponible.
+              peut t&apos;apporter. Choisis la consultation qui te correspond pour
+              poser ton message et réserver un créneau disponible.
             </p>
-            <div className="mt-7 grid gap-3 sm:grid-cols-3">
-              <div className="products-hero-pill">
-                <span>{consultations.length}</span>
-                Tirages
+            <div className="products-hero-ritual">
+              <div className="products-hero-deck" aria-hidden="true">
+                <span className="products-hero-card products-hero-card-left" />
+                <span className="products-hero-card products-hero-card-center" />
+                <span className="products-hero-card products-hero-card-right" />
               </div>
-              <div className="products-hero-pill">
-                <span>En ligne</span>
-                Réservation
-              </div>
-              <div className="products-hero-pill">
-                <span>Soin</span>
-                Lecture préparée
+              <div className="products-hero-journey">
+                <span>Une question</span>
+                <span>Un créneau</span>
+                <span>Ta guidance</span>
               </div>
             </div>
           </div>
