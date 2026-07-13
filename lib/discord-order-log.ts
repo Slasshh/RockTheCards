@@ -1,3 +1,5 @@
+import { formatPhoneNumberForDiscord } from "@/lib/phone-number";
+
 type OrderWebhookPayload = {
   bookingId: number;
   checkoutUrl?: string;
@@ -79,7 +81,9 @@ export async function sendOrderDiscordLog(payload: OrderWebhookPayload) {
     {
       inline: true,
       name: "Téléphone",
-      value: payload.phone || "Non renseigné",
+      value: payload.phone
+        ? formatPhoneNumberForDiscord(payload.phone)
+        : "Non renseigné",
     },
     {
       inline: true,

@@ -8,6 +8,7 @@ import {
   parseDisabledDaysByMonth,
   parseNumberList,
 } from "@/lib/booking-slots";
+import { parseCustomerPhoneNumber } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 
@@ -39,7 +40,8 @@ export async function createBooking(
   const name = String(formData.get("name") ?? "").trim();
   const firstName = String(formData.get("firstName") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
-  const phone = String(formData.get("phone") ?? "").trim();
+  const phoneInput = String(formData.get("phone") ?? "").trim();
+  const phoneCountry = String(formData.get("phoneCountry") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim();
   const preferredDateValue = String(formData.get("preferredDate") ?? "");
 
@@ -93,12 +95,23 @@ export async function createBooking(
       (customerFields.includes("firstName") && !firstName) ||
       (customerFields.includes("name") && !name) ||
       (customerFields.includes("email") && !email) ||
-      (customerFields.includes("phone") && !phone);
+      (customerFields.includes("phone") && !phoneInput);
 
     if (missingRequiredField) {
       return {
         ok: false,
         message: "Remplis tous les champs client demandés.",
+      };
+    }
+
+    const phoneNumber = customerFields.includes("phone")
+      ? parseCustomerPhoneNumber(phoneInput, phoneCountry)
+      : null;
+
+    if (customerFields.includes("phone") && !phoneNumber) {
+      return {
+        ok: false,
+        message: "Saisis un numéro de téléphone valide pour le pays choisi.",
       };
     }
 
@@ -187,7 +200,7 @@ export async function createBooking(
       firstName,
       messageChunkCount: String(messageChunks.length),
       name,
-      phone,
+      phone: phoneNumber?.number ?? "",
       preferredDate: preferredDate?.toISOString() ?? "",
     };
 

@@ -8,6 +8,7 @@ import {
   parseNumberList,
 } from "@/lib/booking-slots";
 import { sendOrderDiscordLog } from "@/lib/discord-order-log";
+import { parseInternationalPhoneNumber } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 
@@ -103,9 +104,17 @@ export async function POST(request: Request) {
       const metadata = session.metadata;
       const consultationId = Number(readMetadataValue(metadata, "consultationId"));
       const message = readMetadataMessage(metadata);
+      const phoneValue = readMetadataValue(metadata, "phone");
+      const phoneNumber = phoneValue
+        ? parseInternationalPhoneNumber(phoneValue)
+        : null;
 
       if (!Number.isInteger(consultationId) || consultationId < 1 || !message) {
         return paidWebhookError("Paid Stripe session has invalid booking metadata.");
+      }
+
+      if (phoneValue && !phoneNumber) {
+        return paidWebhookError("Paid Stripe session has an invalid phone number.");
       }
 
       const preferredDate = parseStripeDate(
@@ -171,8 +180,7 @@ export async function POST(request: Request) {
               !readMetadataValue(metadata, "name")) ||
             (customerFields.includes("email") &&
               !readMetadataValue(metadata, "email")) ||
-            (customerFields.includes("phone") &&
-              !readMetadataValue(metadata, "phone"));
+            (customerFields.includes("phone") && !phoneNumber);
 
           if (missingRequiredField) {
             throw new Error(
@@ -248,7 +256,7 @@ export async function POST(request: Request) {
                 name: readMetadataValue(metadata, "name") || null,
                 orderStatus,
                 paymentStatus: "paid",
-                phone: readMetadataValue(metadata, "phone") || null,
+                phone: phoneNumber?.number ?? null,
                 preferredDate,
                 stripeSessionId: session.id,
               },

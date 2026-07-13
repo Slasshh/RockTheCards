@@ -1,8 +1,10 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
+import type { PhoneCountryOption } from "@/lib/phone-number";
 import type { BookingState } from "./actions";
 import DatePicker, { getSelectedHour } from "./date-picker";
+import PhoneCountryPicker from "./phone-country-picker";
 
 type ProductBookingFormProps = {
   allowSameDayBooking: boolean;
@@ -23,6 +25,7 @@ type ProductBookingFormProps = {
   disableFrenchHolidays: boolean;
   disabledMonthDays: number[];
   disabledWeekdays: number[];
+  phoneCountryOptions: readonly PhoneCountryOption[];
   slotDurationMinutes: number;
 };
 
@@ -47,6 +50,7 @@ export default function ProductBookingForm({
   disableFrenchHolidays,
   disabledMonthDays,
   disabledWeekdays,
+  phoneCountryOptions,
   slotDurationMinutes,
 }: ProductBookingFormProps) {
   const [selectedDate, setSelectedDate] = useState("");
@@ -126,16 +130,23 @@ export default function ProductBookingForm({
         </label>
       ) : null}
       {enabledFields.includes("phone") ? (
-        <label className="grid gap-2 text-sm font-bold" suppressHydrationWarning>
-          Téléphone
-          <input
-            name="phone"
-            placeholder="06..."
-            required
-            suppressHydrationWarning
-            type="tel"
-          />
-        </label>
+        <fieldset className="product-phone-field" suppressHydrationWarning>
+          <legend>Téléphone</legend>
+          <div className="product-phone-control">
+            <PhoneCountryPicker countries={phoneCountryOptions} />
+            <input
+              aria-label="Numéro de téléphone"
+              autoComplete="tel-national"
+              inputMode="tel"
+              maxLength={32}
+              name="phone"
+              placeholder="06 12 34 56 78"
+              required
+              suppressHydrationWarning
+              type="tel"
+            />
+          </div>
+        </fieldset>
       ) : null}
 
       {bookable ? (

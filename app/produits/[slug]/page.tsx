@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { createBooking } from "@/app/actions";
 import HomeNavbar from "@/app/home-navbar";
 import ProductBookingForm from "@/app/product-booking-form";
+import { PHONE_COUNTRY_OPTIONS } from "@/lib/phone-number";
 import { formatProductBadge } from "@/lib/product-labels";
 import { prisma } from "@/lib/prisma";
 
@@ -140,6 +141,7 @@ export default async function ProductPage({
               disabledWeekdays={parseDisabledWeekdays(
                 consultation.disabledWeekdays,
               )}
+              phoneCountryOptions={PHONE_COUNTRY_OPTIONS}
               slotDurationMinutes={consultation.slotDurationMinutes}
             />
           </div>
