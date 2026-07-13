@@ -44,6 +44,10 @@ type ProductFormValues = Omit<AdminProduct, "bookings" | "createdAt" | "_count">
 type AdminDashboardProps = {
   createProduct: (formData: FormData) => Promise<void>;
   deleteProduct: (formData: FormData) => Promise<void>;
+  disconnectGoogleCalendar: () => Promise<void>;
+  googleCalendarNotice: GoogleCalendarNotice;
+  googleCalendarStatus: GoogleCalendarStatus;
+  initialView: AdminView;
   orders: AdminOrder[];
   products: AdminProduct[];
   updateOrderStatus: (formData: FormData) => Promise<void>;
@@ -71,7 +75,28 @@ type AdminOrder = {
   stripeSessionId: string | null;
 };
 
-type AdminView = "products" | "datePicker" | "orders" | "stats";
+type GoogleCalendarNotice =
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "scope"
+  | null;
+
+type GoogleCalendarStatus = {
+  configurationReady: boolean;
+  connected: boolean;
+  email: string | null;
+  needsReconnect: boolean;
+  redirectUri: string | null;
+  updatedAt: string | null;
+};
+
+type AdminView =
+  | "products"
+  | "datePicker"
+  | "orders"
+  | "stats"
+  | "calendar";
 
 const adminViews: Array<{
   description: string;
@@ -97,6 +122,11 @@ const adminViews: Array<{
     description: "Chiffres, périodes et graphiques",
     id: "stats",
     label: "Stats",
+  },
+  {
+    description: "Compte connecté et synchronisation",
+    id: "calendar",
+    label: "Google Agenda",
   },
 ];
 
@@ -129,6 +159,10 @@ const emptyProduct: ProductFormValues = {
 export default function AdminDashboard({
   createProduct,
   deleteProduct,
+  disconnectGoogleCalendar,
+  googleCalendarNotice,
+  googleCalendarStatus,
+  initialView,
   orders,
   products,
   updateOrderStatus,
@@ -136,7 +170,7 @@ export default function AdminDashboard({
   updateProductDatePicker,
   userLabel,
 }: AdminDashboardProps) {
-  const [activeView, setActiveView] = useState<AdminView>("products");
+  const [activeView, setActiveView] = useState<AdminView>(initialView);
   const [selectedProduct, setSelectedProduct] =
     useState<ProductFormValues | null>(null);
   const paidRevenue = orders.reduce(
@@ -258,9 +292,151 @@ export default function AdminDashboard({
           {activeView === "stats" ? (
             <StatsPanel orders={orders} products={products} />
           ) : null}
+
+          {activeView === "calendar" ? (
+            <GoogleCalendarPanel
+              disconnectGoogleCalendar={disconnectGoogleCalendar}
+              notice={googleCalendarNotice}
+              status={googleCalendarStatus}
+            />
+          ) : null}
         </div>
       </section>
     </main>
+  );
+}
+
+function GoogleCalendarPanel({
+  disconnectGoogleCalendar,
+  notice,
+  status,
+}: {
+  disconnectGoogleCalendar: () => Promise<void>;
+  notice: GoogleCalendarNotice;
+  status: GoogleCalendarStatus;
+}) {
+  const connectionLabel = status.connected
+    ? "Connecté"
+    : status.needsReconnect
+      ? "Reconnexion requise"
+      : "Non connecté";
+  const noticeContent =
+    notice === "connected"
+      ? {
+          className: "border-[#2C7A5A] bg-[#E8F6EF] text-[#155D43]",
+          text: "Google Agenda est connecté.",
+        }
+      : notice === "disconnected"
+        ? {
+            className: "border-[#75C7E7] bg-[#EEF8FC] text-[#182B49]",
+            text: "Google Agenda est déconnecté.",
+          }
+        : notice === "scope"
+          ? {
+              className: "border-[#C24D4D] bg-[#FFF1F1] text-[#8A2828]",
+              text: "L'accès aux événements Google Agenda doit être autorisé.",
+            }
+        : notice === "error"
+          ? {
+              className: "border-[#C24D4D] bg-[#FFF1F1] text-[#8A2828]",
+              text: "La connexion Google a échoué.",
+            }
+          : null;
+
+  return (
+    <div>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#182B49]">
+            Intégration
+          </p>
+          <h1 className="mt-3 text-4xl font-semibold md:text-6xl">
+            Google Agenda
+          </h1>
+        </div>
+        <p className="text-sm font-bold text-[#182B49]">{connectionLabel}</p>
+      </div>
+
+      {noticeContent ? (
+        <p
+          aria-live="polite"
+          className={`mt-6 border px-4 py-3 text-sm font-semibold ${noticeContent.className}`}
+        >
+          {noticeContent.text}
+        </p>
+      ) : null}
+
+      <div className="mt-8 grid border-y border-[#75C7E7] md:grid-cols-3 md:divide-x md:divide-[#75C7E7]">
+        <div className="py-5 md:pr-6">
+          <span className="text-xs font-bold uppercase text-[#48627F]">
+            Compte Google
+          </span>
+          <strong className="mt-2 block break-all text-base text-[#182B49]">
+            {status.email ?? "Aucun compte"}
+          </strong>
+        </div>
+        <div className="border-t border-[#75C7E7] py-5 md:border-t-0 md:px-6">
+          <span className="text-xs font-bold uppercase text-[#48627F]">
+            Agenda cible
+          </span>
+          <strong className="mt-2 block text-base text-[#182B49]">
+            Agenda principal
+          </strong>
+        </div>
+        <div className="border-t border-[#75C7E7] py-5 md:border-t-0 md:pl-6">
+          <span className="text-xs font-bold uppercase text-[#48627F]">
+            Dernière connexion
+          </span>
+          <strong className="mt-2 block text-base text-[#182B49]">
+            {status.updatedAt
+              ? new Date(status.updatedAt).toLocaleString("fr-FR")
+              : "Jamais"}
+          </strong>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <p className="text-xs font-bold uppercase text-[#48627F]">
+          URI de redirection OAuth
+        </p>
+        <code className="mt-2 block break-all border-l-4 border-[#FFD35A] bg-[#EEF8FC] px-4 py-3 text-sm text-[#182B49]">
+          {status.redirectUri ?? "NEXTAUTH_URL non configurée"}
+        </code>
+      </div>
+
+      <div className="mt-8 flex flex-wrap gap-3">
+        {status.configurationReady ? (
+          <Link
+            className="rounded-md bg-[#182B49] px-5 py-3 text-sm font-bold text-[#F4F8FB] transition hover:bg-[#29496F]"
+            href="/api/admin/google-calendar/connect"
+            prefetch={false}
+          >
+            {status.connected || status.needsReconnect
+              ? "Reconnecter Google Agenda"
+              : "Connecter Google Agenda"}
+          </Link>
+        ) : (
+          <button
+            className="cursor-not-allowed rounded-md bg-[#D8E1EA] px-5 py-3 text-sm font-bold text-[#60748A]"
+            disabled
+            type="button"
+          >
+            Configuration OAuth manquante
+          </button>
+        )}
+
+        {status.connected || status.needsReconnect ? (
+          <form action={disconnectGoogleCalendar}>
+            <button
+              className="rounded-md border border-[#C24D4D] px-5 py-3 text-sm font-bold text-[#8A2828] transition hover:bg-[#FFF1F1]"
+              type="submit"
+            >
+              Déconnecter
+            </button>
+          </form>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

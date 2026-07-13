@@ -19,5 +19,5 @@ logs
 *.tsbuildinfo
 
 generated/prisma
-Dockerfile
+deploy/Dockerfile
 Makefile

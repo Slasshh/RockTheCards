@@ -15,11 +15,8 @@ RUN DATABASE_URL="mysql://user:password@127.0.0.1:3306/rockthecards" bun install
 RUN rm -rf generated/prisma \
     && DATABASE_URL="mysql://user:password@127.0.0.1:3306/rockthecards" bun x --bun prisma generate
 
-COPY app/ ./app/
-COPY lib/ ./lib/
+COPY src/ ./src/
 COPY public/ ./public/
-COPY auth-options.ts ./
-COPY next-auth.d.ts ./
 COPY next.config.ts ./
 COPY postcss.config.mjs ./
 COPY tsconfig.json ./

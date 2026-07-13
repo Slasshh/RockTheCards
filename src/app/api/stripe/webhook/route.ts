@@ -8,6 +8,7 @@ import {
   parseNumberList,
 } from "@/lib/booking-slots";
 import { sendOrderDiscordLog } from "@/lib/discord-order-log";
+import { syncPaidBookingToGoogleCalendar } from "@/lib/google-calendar";
 import { parseInternationalPhoneNumber } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
@@ -128,6 +129,7 @@ export async function POST(request: Request) {
               consultation: {
                 select: {
                   price: true,
+                  slotDurationMinutes: true,
                   title: true,
                 },
               },
@@ -272,22 +274,66 @@ export async function POST(request: Request) {
           return NextResponse.json({ received: true });
         }
 
-        await sendOrderDiscordLog({
-          bookingId: result.booking.id,
-          consultationTitle: result.consultation.title,
-          email: result.booking.email,
-          firstName: result.booking.firstName,
-          message: result.booking.message ?? "",
-          name: result.booking.name,
-          paymentStatus: result.alreadyPaidSlot
-            ? "payé - conflit de créneau"
-            : "payé",
-          phone: result.booking.phone,
-          preferredDate: result.booking.preferredDate,
-          price: result.consultation.price,
-          title: result.alreadyPaidSlot
-            ? "Paiement reçu - créneau déjà pris"
-            : "Commande payée",
+        const postPaymentTasks: Array<{
+          name: string;
+          promise: Promise<void>;
+        }> = [];
+
+        if (!result.alreadyPaidSlot && result.booking.preferredDate) {
+          postPaymentTasks.push({
+            name: "Google Calendar synchronization",
+            promise: syncPaidBookingToGoogleCalendar({
+              bookingId: result.booking.id,
+              consultationTitle: result.consultation.title,
+              email: result.booking.email,
+              firstName: result.booking.firstName,
+              message: result.booking.message ?? "",
+              name: result.booking.name,
+              phone: result.booking.phone,
+              preferredDate: result.booking.preferredDate,
+              slotDurationMinutes: result.consultation.slotDurationMinutes,
+              stripeSessionId: session.id,
+            }),
+          });
+        }
+
+        postPaymentTasks.push({
+          name: "Discord order notification",
+          promise: sendOrderDiscordLog({
+            bookingId: result.booking.id,
+            consultationTitle: result.consultation.title,
+            email: result.booking.email,
+            firstName: result.booking.firstName,
+            message: result.booking.message ?? "",
+            name: result.booking.name,
+            paymentStatus: result.alreadyPaidSlot
+              ? "payé - conflit de créneau"
+              : "payé",
+            phone: result.booking.phone,
+            preferredDate: result.booking.preferredDate,
+            price: result.consultation.price,
+            title: result.alreadyPaidSlot
+              ? "Paiement reçu - créneau déjà pris"
+              : "Commande payée",
+          }),
+        });
+
+        const postPaymentResults = await Promise.allSettled(
+          postPaymentTasks.map((task) => task.promise),
+        );
+
+        postPaymentResults.forEach((taskResult, index) => {
+          if (taskResult.status === "fulfilled") {
+            return;
+          }
+
+          const task = postPaymentTasks[index];
+          console.error(
+            `${task?.name ?? "Post-payment task"} failed:`,
+            taskResult.reason instanceof Error
+              ? taskResult.reason.message
+              : "Unknown error",
+          );
         });
       } catch (error) {
         if (!isUniqueConstraintError(error)) {

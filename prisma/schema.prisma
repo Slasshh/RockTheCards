@@ -50,3 +50,12 @@ model Booking {
   consultationId Int
   createdAt      DateTime     @default(now())
 }
+
+model GoogleCalendarConnection {
+  id                    Int      @id
+  googleAccountId       String   @db.VarChar(255)
+  googleEmail           String   @db.VarChar(320)
+  encryptedRefreshToken String   @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}

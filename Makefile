@@ -7,11 +7,11 @@ IMAGE_LABEL ?= fr.slimelab.image=$(IMAGE_NAME)
 ENV_FILE ?= .env.production
 PORT ?= 3030
 
-.PHONY: build clean clean-containers clean-images clean-dangling rebuild run restart stop logs shell ps inspect lint typecheck next-build prisma-generate prisma-push prisma-push-production prisma-deploy start start-production
+.PHONY: build clean clean-containers clean-images clean-dangling rebuild deploy migrate baseline run restart stop logs shell ps inspect lint typecheck next-build prisma-generate prisma-push start start-production
 
 build:
 	@echo "Build propre de l'image $(IMAGE_REF)..."
-	docker build --pull --no-cache --label "$(APP_LABEL)" --label "$(IMAGE_LABEL)" -t "$(IMAGE_REF)" .
+	docker build --pull --no-cache --label "$(APP_LABEL)" --label "$(IMAGE_LABEL)" -f deploy/Dockerfile -t "$(IMAGE_REF)" .
 
 clean-containers:
 	@echo "Suppression des conteneurs $(CONTAINER_NAME), labels $(APP_LABEL), anciennes images $(IMAGE_NAME)..."
@@ -48,7 +48,13 @@ clean-dangling:
 
 clean: clean-containers clean-images clean-dangling
 
-rebuild: clean build run
+rebuild:
+	$(MAKE) clean
+	$(MAKE) deploy
+
+deploy:
+	$(MAKE) migrate
+	$(MAKE) restart
 
 run:
 	@echo "Demarrage du conteneur $(CONTAINER_NAME) depuis $(IMAGE_REF)..."
@@ -88,10 +94,13 @@ prisma-generate:
 prisma-push:
 	bun --env-file=.env x --bun prisma db push
 
-prisma-push-production:
-	docker run --rm --network host -v "$(CURDIR)/$(ENV_FILE):/usr/src/app/.env.production:ro" "$(IMAGE_REF)" bun --env-file=.env.production x --bun prisma db push
+baseline: build
+	@echo "Initialisation unique de l'historique Prisma en production..."
+	docker run --rm --network host -v "$(CURDIR)/$(ENV_FILE):/usr/src/app/.env.production:ro" "$(IMAGE_REF)" bun run db:prod:migrate:baseline
 
-prisma-deploy: prisma-push-production
+migrate: build
+	@echo "Application des migrations Prisma en production..."
+	docker run --rm --network host -v "$(CURDIR)/$(ENV_FILE):/usr/src/app/.env.production:ro" "$(IMAGE_REF)" bun run db:prod:migrate
 
 start:
 	bun --env-file=.env run dev

@@ -4,6 +4,11 @@ import { getServerSession } from "next-auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/auth-options";
+import {
+  createGoogleOAuthClient,
+  decryptGoogleRefreshToken,
+  GOOGLE_CALENDAR_CONNECTION_ID,
+} from "@/lib/google-calendar-oauth";
 import { prisma } from "@/lib/prisma";
 
 async function requireAdmin() {
@@ -373,4 +378,34 @@ export async function updateOrderStatus(formData: FormData) {
   });
 
   revalidatePath("/admin");
+}
+
+export async function disconnectGoogleCalendar() {
+  await requireAdmin();
+
+  const connection = await prisma.googleCalendarConnection.findUnique({
+    select: { encryptedRefreshToken: true },
+    where: { id: GOOGLE_CALENDAR_CONNECTION_ID },
+  });
+
+  if (connection) {
+    try {
+      const refreshToken = decryptGoogleRefreshToken(
+        connection.encryptedRefreshToken,
+      );
+      await createGoogleOAuthClient().revokeToken(refreshToken);
+    } catch (error) {
+      console.error(
+        "Google Calendar OAuth revocation failed:",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+    }
+
+    await prisma.googleCalendarConnection.delete({
+      where: { id: GOOGLE_CALENDAR_CONNECTION_ID },
+    });
+  }
+
+  revalidatePath("/admin");
+  redirect("/admin?view=calendar&googleCalendar=disconnected");
 }

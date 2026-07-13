@@ -13,13 +13,15 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo",
     "plugins": [
       {
         "name": "next"
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/generated/*": ["./generated/*"],
+      "@/*": ["./src/*"]
     }
   },
   "include": [

@@ -1,5 +1,5 @@
 import { PrismaClient } from "../generated/prisma/client";
-import { createMariaDbAdapter } from "../lib/mariadb-adapter";
+import { createMariaDbAdapter } from "../src/lib/mariadb-adapter";
 
 const databaseUrl = process.env.DATABASE_URL;
 
