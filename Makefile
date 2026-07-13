@@ -7,11 +7,17 @@ IMAGE_LABEL ?= fr.slimelab.image=$(IMAGE_NAME)
 ENV_FILE ?= .env.production
 PORT ?= 3030
 
-.PHONY: build clean clean-containers clean-images clean-dangling rebuild deploy migrate baseline run restart stop logs shell ps inspect lint typecheck next-build prisma-generate prisma-push start start-production
+.PHONY: build ensure-image clean clean-containers clean-images clean-dangling rebuild deploy migrate baseline run restart stop logs shell ps inspect lint typecheck next-build prisma-generate prisma-push start start-production
 
 build:
 	@echo "Build propre de l'image $(IMAGE_REF)..."
 	docker build --pull --no-cache --label "$(APP_LABEL)" --label "$(IMAGE_LABEL)" -f deploy/Dockerfile -t "$(IMAGE_REF)" .
+
+ensure-image:
+	@if ! docker image inspect "$(IMAGE_REF)" >/dev/null 2>&1; then \
+		echo "Image $(IMAGE_REF) absente, construction initiale..."; \
+		$(MAKE) build; \
+	fi
 
 clean-containers:
 	@echo "Suppression des conteneurs $(CONTAINER_NAME), labels $(APP_LABEL), anciennes images $(IMAGE_NAME)..."
@@ -53,6 +59,7 @@ rebuild:
 	$(MAKE) deploy
 
 deploy:
+	$(MAKE) build
 	$(MAKE) migrate
 	$(MAKE) restart
 
@@ -94,11 +101,11 @@ prisma-generate:
 prisma-push:
 	bun --env-file=.env x --bun prisma db push
 
-baseline: build
+baseline: ensure-image
 	@echo "Initialisation unique de l'historique Prisma en production..."
 	docker run --rm --network host -v "$(CURDIR)/$(ENV_FILE):/usr/src/app/.env.production:ro" "$(IMAGE_REF)" bun run db:prod:migrate:baseline
 
-migrate: build
+migrate: ensure-image
 	@echo "Application des migrations Prisma en production..."
 	docker run --rm --network host -v "$(CURDIR)/$(ENV_FILE):/usr/src/app/.env.production:ro" "$(IMAGE_REF)" bun run db:prod:migrate
 

@@ -45,14 +45,16 @@ bun run db:dev:studio
 bun run db:dev:validate
 ```
 
-En production, une seule commande construit l'image courante et applique toutes
-les migrations en attente avec `.env.production` :
+En production, cette commande applique toutes les migrations présentes dans
+l'image Docker avec `.env.production`. Elle réutilise l'image existante et ne la
+construit que si elle est absente :
 
 ```bash
 make migrate
 ```
 
-Pour construire, migrer puis redémarrer complètement l'application :
+Pour reconstruire une seule fois la nouvelle version, appliquer ses migrations,
+puis redémarrer l'application :
 
 ```bash
 make deploy
