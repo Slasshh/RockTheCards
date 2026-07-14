@@ -1886,6 +1886,14 @@ function formatPeriodLabel(key: string, groupByDay: boolean) {
   });
 }
 
+function formatStatsDateLabel(key: string) {
+  return new Date(`${key}T12:00:00`).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function getMonthTitle(monthKey: string) {
   return new Date(`${monthKey}-01T12:00:00`).toLocaleDateString("fr-FR", {
     month: "long",
@@ -1926,31 +1934,185 @@ function getCalendarDays(monthKey: string) {
   });
 }
 
-type PeriodStat = [string, number];
+type ChartMetric = "bookings" | "revenue";
+
+type PeriodStat = {
+  bookings: number;
+  key: string;
+  revenueCents: number;
+};
 
 type ChartPoint = {
-  count: number;
-  label: string;
+  key: string;
+  value: number;
   x: number;
   y: number;
 };
 
-function getCurvePoints(periodStats: PeriodStat[]) {
-  const width = 720;
-  const height = 280;
-  const paddingX = 44;
-  const paddingY = 30;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingY * 2;
-  const maxCount = Math.max(1, ...periodStats.map(([, count]) => count));
+const chartDimensions = {
+  bottom: 292,
+  height: 340,
+  left: 72,
+  right: 28,
+  top: 28,
+  width: 960,
+} as const;
+
+const euroAxisFormatter = new Intl.NumberFormat("fr-FR", {
+  maximumFractionDigits: 1,
+  notation: "compact",
+});
+
+const averageFormatter = new Intl.NumberFormat("fr-FR", {
+  maximumFractionDigits: 1,
+});
+
+function getDayRangeLength(startDate: string, endDate: string) {
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+  const startTime = Date.UTC(startYear, startMonth - 1, startDay);
+  const endTime = Date.UTC(endYear, endMonth - 1, endDay);
+
+  return Math.floor((endTime - startTime) / 86_400_000) + 1;
+}
+
+function getDayKeys(startDate: string, endDate: string) {
+  const keys: string[] = [];
+  const cursor = new Date(`${startDate}T12:00:00`);
+  const limit = new Date(`${endDate}T12:00:00`);
+
+  while (cursor <= limit) {
+    keys.push(getLocalDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return keys;
+}
+
+function getMonthKeys(startMonth: string, endMonth: string) {
+  const keys: string[] = [];
+  let cursor = startMonth;
+
+  while (cursor <= endMonth) {
+    keys.push(cursor);
+    cursor = shiftMonth(cursor, 1);
+  }
+
+  return keys;
+}
+
+function getStatsPeriodKeys({
+  endDate,
+  groupByDay,
+  monthFilter,
+  orders,
+  startDate,
+}: {
+  endDate: string;
+  groupByDay: boolean;
+  monthFilter: string;
+  orders: AdminOrder[];
+  startDate: string;
+}) {
+  if (groupByDay) {
+    if (monthFilter) {
+      const [year, month] = monthFilter.split("-").map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const naturalEnd = `${monthFilter}-${String(lastDay).padStart(2, "0")}`;
+      const today = getRelativeDateKey(0);
+      const monthEnd = monthFilter === today.slice(0, 7) ? today : naturalEnd;
+
+      return getDayKeys(`${monthFilter}-01`, monthEnd);
+    }
+
+    const rangeStart = startDate || endDate || getRelativeDateKey(0);
+    const rangeEnd = endDate || startDate || rangeStart;
+
+    return getDayKeys(rangeStart, rangeEnd);
+  }
+
+  if (startDate && endDate) {
+    return getMonthKeys(startDate.slice(0, 7), endDate.slice(0, 7));
+  }
+
+  const currentMonth = getRelativeDateKey(0).slice(0, 7);
+  const latestOrderMonth = orders.reduce(
+    (latest, order) => {
+      const orderMonth = getDateKey(order.createdAt).slice(0, 7);
+      return orderMonth > latest ? orderMonth : latest;
+    },
+    currentMonth,
+  );
+
+  return Array.from({ length: 6 }, (_, index) =>
+    shiftMonth(latestOrderMonth, index - 5),
+  );
+}
+
+function getMetricValue(stat: PeriodStat, metric: ChartMetric) {
+  return metric === "bookings" ? stat.bookings : stat.revenueCents;
+}
+
+function getNiceRevenueStep(maxValue: number) {
+  const roughStep = Math.max(100, maxValue / 4);
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+  const niceNormalized =
+    normalized <= 1
+      ? 1
+      : normalized <= 2
+        ? 2
+        : normalized <= 2.5
+          ? 2.5
+          : normalized <= 5
+            ? 5
+            : 10;
+
+  return niceNormalized * magnitude;
+}
+
+function getChartScale(values: number[], metric: ChartMetric) {
+  const maxValue = Math.max(0, ...values);
+  const step =
+    metric === "bookings"
+      ? Math.max(1, Math.ceil(maxValue / 4))
+      : getNiceRevenueStep(maxValue || 10_000);
+  const scaleMax = Math.max(
+    metric === "bookings" ? 4 : step,
+    Math.ceil(maxValue / step) * step,
+  );
+  const tickCount = Math.round(scaleMax / step);
+
+  return {
+    max: scaleMax,
+    ticks: Array.from({ length: tickCount + 1 }, (_, index) => index * step),
+  };
+}
+
+function getCurvePoints(
+  periodStats: PeriodStat[],
+  metric: ChartMetric,
+  scaleMax: number,
+) {
+  const plotWidth =
+    chartDimensions.width - chartDimensions.left - chartDimensions.right;
+  const plotHeight = chartDimensions.bottom - chartDimensions.top;
   const divisor = Math.max(1, periodStats.length - 1);
 
-  return periodStats.map(([period, count], index) => ({
-    count,
-    label: period,
-    x: paddingX + (index / divisor) * chartWidth,
-    y: paddingY + (1 - count / maxCount) * chartHeight,
-  }));
+  return periodStats.map((stat, index) => {
+    const value = getMetricValue(stat, metric);
+    const x =
+      periodStats.length === 1
+        ? chartDimensions.left + plotWidth / 2
+        : chartDimensions.left + (index / divisor) * plotWidth;
+
+    return {
+      key: stat.key,
+      value,
+      x,
+      y: chartDimensions.bottom - (value / scaleMax) * plotHeight,
+    };
+  });
 }
 
 function getSmoothPath(points: ChartPoint[]) {
@@ -1958,172 +2120,398 @@ function getSmoothPath(points: ChartPoint[]) {
     return "";
   }
 
-  const [firstPoint, ...restPoints] = points;
+  if (points.length === 1) {
+    return `M ${chartDimensions.left} ${points[0].y} L ${chartDimensions.width - chartDimensions.right} ${points[0].y}`;
+  }
 
-  return restPoints.reduce((path, point, index) => {
+  return points.slice(1).reduce((path, point, index) => {
     const previous = points[index];
-    const controlX = (previous.x + point.x) / 2;
+    const controlOffset = (point.x - previous.x) * 0.36;
 
-    return `${path} C ${controlX} ${previous.y}, ${controlX} ${point.y}, ${point.x} ${point.y}`;
-  }, `M ${firstPoint.x} ${firstPoint.y}`);
+    return `${path} C ${previous.x + controlOffset} ${previous.y}, ${point.x - controlOffset} ${point.y}, ${point.x} ${point.y}`;
+  }, `M ${points[0].x} ${points[0].y}`);
 }
 
-function ReservationsCurve({
+function getLabelIndexes(length: number) {
+  if (length <= 6) {
+    return Array.from({ length }, (_, index) => index);
+  }
+
+  return Array.from(
+    new Set(
+      Array.from({ length: 6 }, (_, index) =>
+        Math.round((index / 5) * (length - 1)),
+      ),
+    ),
+  );
+}
+
+function formatAxisValue(value: number, metric: ChartMetric) {
+  if (metric === "bookings") {
+    return String(value);
+  }
+
+  return `${euroAxisFormatter.format(value / 100)} €`;
+}
+
+function formatMetricValue(value: number, metric: ChartMetric) {
+  if (metric === "bookings") {
+    return `${value} réservation${value === 1 ? "" : "s"}`;
+  }
+
+  return formatPriceFromCents(value);
+}
+
+function formatSignedMetricValue(value: number, metric: ChartMetric) {
+  const prefix = value > 0 ? "+" : "";
+
+  if (metric === "bookings") {
+    return `${prefix}${value}`;
+  }
+
+  return `${prefix}${formatPriceFromCents(value)}`;
+}
+
+function formatTooltipPeriod(key: string, groupByDay: boolean) {
+  return new Date(`${key}${groupByDay ? "" : "-01"}T12:00:00`).toLocaleDateString(
+    "fr-FR",
+    groupByDay
+      ? { day: "numeric", month: "short", year: "numeric" }
+      : { month: "long", year: "numeric" },
+  );
+}
+
+function ActivityCurve({
   groupByDay,
   periodStats,
 }: {
   groupByDay: boolean;
   periodStats: PeriodStat[];
 }) {
-  const points = getCurvePoints(periodStats);
+  const [metric, setMetric] = useState<ChartMetric>("bookings");
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const values = periodStats.map((stat) => getMetricValue(stat, metric));
+  const scale = getChartScale(values, metric);
+  const points = getCurvePoints(periodStats, metric, scale.max);
   const curvePath = getSmoothPath(points);
-  const baseline = 250;
-  const areaPath = points.length
-    ? `${curvePath} L ${points[points.length - 1].x} ${baseline} L ${points[0].x} ${baseline} Z`
+  const curveStartX =
+    points.length === 1 ? chartDimensions.left : (points[0]?.x ?? 0);
+  const curveEndX =
+    points.length === 1
+      ? chartDimensions.width - chartDimensions.right
+      : (points.at(-1)?.x ?? 0);
+  const areaPath = curvePath
+    ? `${curvePath} L ${curveEndX} ${chartDimensions.bottom} L ${curveStartX} ${chartDimensions.bottom} Z`
     : "";
-  const maxCount = Math.max(1, ...periodStats.map(([, count]) => count));
-  const total = periodStats.reduce((sum, [, count]) => sum + count, 0);
-  const latest = periodStats.at(-1)?.[1] ?? 0;
-  const previous = periodStats.at(-2)?.[1] ?? latest;
-  const trend = latest - previous;
-  const labelIndexes = Array.from(
-    new Set([
-      0,
-      Math.floor((periodStats.length - 1) / 2),
-      periodStats.length - 1,
-    ]),
-  ).filter((index) => index >= 0);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const average = periodStats.length ? total / periodStats.length : 0;
+  const latest = values.at(-1) ?? 0;
+  const previous = values.at(-2) ?? latest;
+  const variation = latest - previous;
+  const resolvedActiveIndex = points.length
+    ? Math.min(activeIndex ?? points.length - 1, points.length - 1)
+    : -1;
+  const activePoint = points[resolvedActiveIndex];
+  const activePeriod = periodStats[resolvedActiveIndex];
+  const labelIndexes = getLabelIndexes(periodStats.length);
+  const tooltipWidth = 174;
+  const tooltipHeight = 58;
+  const tooltipX = activePoint
+    ? Math.min(
+        Math.max(activePoint.x - tooltipWidth / 2, chartDimensions.left),
+        chartDimensions.width - chartDimensions.right - tooltipWidth,
+      )
+    : 0;
+  const tooltipY = activePoint
+    ? activePoint.y < chartDimensions.top + tooltipHeight + 16
+      ? activePoint.y + 16
+      : activePoint.y - tooltipHeight - 16
+    : 0;
+  const chartTitle =
+    metric === "bookings"
+      ? `Réservations par ${groupByDay ? "jour" : "mois"}`
+      : `CA payé par ${groupByDay ? "jour" : "mois"}`;
+  const chartAriaLabel =
+    metric === "bookings"
+      ? `Courbe des réservations par ${groupByDay ? "jour" : "mois"}`
+      : `Courbe du chiffre d'affaires payé par ${groupByDay ? "jour" : "mois"}`;
+  const averageValue =
+    metric === "bookings"
+      ? averageFormatter.format(average)
+      : formatPriceFromCents(Math.round(average));
 
   return (
-    <section className="rounded-lg border border-[#75C7E7] bg-[#F4F8FB] p-5 shadow-sm xl:col-span-2">
+    <section
+      className="min-w-0 rounded-lg border border-[#75C7E7] bg-[#F4F8FB] p-5 shadow-sm xl:col-span-2 md:p-6"
+      data-testid="stats-activity-chart"
+    >
       <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#425D78]">
-            Rythme
+            Évolution
           </p>
-          <h2 className="mt-2 text-2xl font-semibold">
-            {groupByDay ? "Réservations par jour" : "Réservations par mois"}
-          </h2>
+          <h2 className="mt-2 text-2xl font-semibold">{chartTitle}</h2>
+          <p className="mt-2 text-sm text-[#425D78]">
+            Lecture {groupByDay ? "quotidienne" : "mensuelle"} de la période
+            affichée.
+          </p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px]">
-          <StatCard label="Total période" value={total} />
-          <StatCard label="Dernier point" value={latest} />
-          <StatCard
-            label="Variation"
-            value={trend > 0 ? `+${trend}` : trend}
-          />
+        <div
+          aria-label="Mesure affichée"
+          className="inline-flex w-fit rounded-md border border-[#75C7E7] bg-white p-1"
+          role="group"
+        >
+          {([
+            ["bookings", "Réservations"],
+            ["revenue", "CA payé"],
+          ] as const).map(([value, label]) => (
+            <button
+              aria-pressed={metric === value}
+              className={`min-h-10 rounded px-4 text-sm font-bold transition ${
+                metric === value
+                  ? "bg-[#182B49] text-white"
+                  : "text-[#182B49] hover:bg-[#BCE8F5]"
+              }`}
+              key={value}
+              onClick={() => {
+                setActiveIndex(null);
+                setMetric(value);
+              }}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-[#75C7E7] bg-[#BCE8F5] p-4">
-        {periodStats.length ? (
-          <div className="min-w-[680px]">
-            <svg
-              aria-label={
-                groupByDay
-                  ? "Courbe des réservations par jour"
-                  : "Courbe des réservations par mois"
+      <dl className="mt-5 grid border-y border-[#C7DFEA] py-4 sm:grid-cols-3 sm:divide-x sm:divide-[#C7DFEA]">
+        <div className="py-2 sm:px-5 sm:first:pl-0">
+          <dt className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+            Total affiché
+          </dt>
+          <dd className="mt-1 text-2xl font-bold text-[#182B49]">
+            {formatMetricValue(total, metric)}
+          </dd>
+        </div>
+        <div className="py-2 sm:px-5">
+          <dt className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+            Moyenne / {groupByDay ? "jour" : "mois"}
+          </dt>
+          <dd className="mt-1 text-2xl font-bold text-[#182B49]">
+            {averageValue}
+          </dd>
+        </div>
+        <div className="py-2 sm:px-5">
+          <dt className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+            Écart vs précédent
+          </dt>
+          <dd
+            className={`mt-1 text-2xl font-bold ${
+              variation > 0
+                ? "text-[#176B4D]"
+                : variation < 0
+                  ? "text-[#A73B3B]"
+                  : "text-[#182B49]"
+            }`}
+          >
+            {formatSignedMetricValue(variation, metric)}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 overflow-x-auto overscroll-x-contain">
+        <div className="mx-auto aspect-[960/340] min-w-[720px] max-w-[1120px]">
+          <svg
+            aria-label={chartAriaLabel}
+            className="block size-full"
+            onMouseLeave={() => setActiveIndex(null)}
+            role="img"
+            viewBox={`0 0 ${chartDimensions.width} ${chartDimensions.height}`}
+          >
+            <title>{chartTitle}</title>
+            <defs>
+              <linearGradient
+                id="stats-curve-fill"
+                x1="0"
+                x2="0"
+                y1="0"
+                y2="1"
+              >
+                <stop offset="0%" stopColor="#75C7E7" stopOpacity="0.48" />
+                <stop offset="100%" stopColor="#75C7E7" stopOpacity="0.03" />
+              </linearGradient>
+            </defs>
+
+            <rect
+              fill="#FFFFFF"
+              height={chartDimensions.bottom - chartDimensions.top}
+              rx="8"
+              width={
+                chartDimensions.width -
+                chartDimensions.left -
+                chartDimensions.right
               }
-              className="h-[300px] w-full"
-              role="img"
-              viewBox="0 0 720 300"
-            >
-              <defs>
-                <linearGradient id="stats-curve-fill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#FFD35A" stopOpacity="0.58" />
-                  <stop offset="100%" stopColor="#FFD35A" stopOpacity="0.04" />
-                </linearGradient>
-              </defs>
-              {[30, 140, 250].map((y, index) => (
-                <g key={y}>
+              x={chartDimensions.left}
+              y={chartDimensions.top}
+            />
+
+            {scale.ticks.map((tick) => {
+              const y =
+                chartDimensions.bottom -
+                (tick / scale.max) *
+                  (chartDimensions.bottom - chartDimensions.top);
+
+              return (
+                <g key={tick}>
                   <line
-                    stroke="#75C7E7"
-                    strokeDasharray={index === 2 ? "0" : "6 6"}
+                    stroke={tick === 0 ? "#9EC9DB" : "#D4E5EC"}
+                    strokeDasharray={tick === 0 ? undefined : "4 7"}
                     strokeWidth="1"
-                    x1="44"
-                    x2="676"
+                    x1={chartDimensions.left}
+                    x2={chartDimensions.width - chartDimensions.right}
                     y1={y}
                     y2={y}
                   />
                   <text
-                    fill="#182B49"
+                    fill="#425D78"
                     fontSize="12"
                     fontWeight="700"
                     textAnchor="end"
-                    x="34"
+                    x={chartDimensions.left - 14}
                     y={y + 4}
                   >
-                    {index === 0
-                      ? maxCount
-                      : index === 1
-                        ? Math.ceil(maxCount / 2)
-                        : 0}
+                    {formatAxisValue(tick, metric)}
                   </text>
                 </g>
-              ))}
-              <path d={areaPath} fill="url(#stats-curve-fill)" />
-              <path
-                d={curvePath}
-                fill="none"
-                stroke="#182B49"
-                strokeLinecap="round"
-                strokeWidth="5"
+              );
+            })}
+
+            {activePoint ? (
+              <line
+                stroke="#E3A817"
+                strokeDasharray="3 6"
+                strokeWidth="1.5"
+                x1={activePoint.x}
+                x2={activePoint.x}
+                y1={chartDimensions.top}
+                y2={chartDimensions.bottom}
               />
-              <path
-                d={curvePath}
-                fill="none"
-                stroke="#FFD35A"
-                strokeLinecap="round"
-                strokeWidth="2"
+            ) : null}
+
+            <path
+              className="admin-stats-area"
+              d={areaPath}
+              fill="url(#stats-curve-fill)"
+            />
+            <path
+              className="admin-stats-curve"
+              d={curvePath}
+              fill="none"
+              pathLength="1"
+              stroke="#1D5A79"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="4"
+            />
+
+            {points.map((point, index) => (
+              <circle
+                cx={point.x}
+                cy={point.y}
+                fill={index === resolvedActiveIndex ? "#FFD35A" : "#FFFFFF"}
+                key={point.key}
+                r={index === resolvedActiveIndex ? 6 : 4}
+                stroke="#1D5A79"
+                strokeWidth="3"
               />
-              {points.map((point) => (
-                <g key={point.label}>
-                  <circle cx={point.x} cy={point.y} fill="#182B49" r="6" />
-                  <circle cx={point.x} cy={point.y} fill="#FFD35A" r="3" />
-                  <text
-                    fill="#182B49"
-                    fontSize="12"
-                    fontWeight="800"
-                    textAnchor="middle"
-                    x={point.x}
-                    y={Math.max(16, point.y - 12)}
-                  >
-                    {point.count}
-                  </text>
-                </g>
-              ))}
-              {labelIndexes.map((index) => {
-                const stat = periodStats[index];
+            ))}
 
-                if (!stat) {
-                  return null;
-                }
+            {points.map((point, index) => {
+              const previousPoint = points[index - 1];
+              const nextPoint = points[index + 1];
+              const hitStart = previousPoint
+                ? (previousPoint.x + point.x) / 2
+                : chartDimensions.left;
+              const hitEnd = nextPoint
+                ? (point.x + nextPoint.x) / 2
+                : chartDimensions.width - chartDimensions.right;
 
-                const point = points[index];
+              return (
+                <rect
+                  aria-label={`${formatTooltipPeriod(point.key, groupByDay)}, ${formatMetricValue(point.value, metric)}`}
+                  fill="transparent"
+                  height={chartDimensions.bottom - chartDimensions.top}
+                  key={point.key}
+                  onBlur={() => setActiveIndex(null)}
+                  onFocus={() => setActiveIndex(index)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  role="img"
+                  tabIndex={0}
+                  width={hitEnd - hitStart}
+                  x={hitStart}
+                  y={chartDimensions.top}
+                />
+              );
+            })}
 
-                return (
-                  <text
-                    fill="#182B49"
-                    fontSize="12"
-                    fontWeight="700"
-                    key={stat[0]}
-                    textAnchor="middle"
-                    x={point.x}
-                    y="282"
-                  >
-                    {formatPeriodLabel(stat[0], groupByDay)}
-                  </text>
-                );
-              })}
-            </svg>
-          </div>
-        ) : (
-          <div className="grid min-h-72 place-items-center text-center">
-            <p className="text-sm font-semibold text-[#182B49]">
-              Pas encore de réservation sur cette période.
-            </p>
-          </div>
-        )}
+            {labelIndexes.map((index) => {
+              const stat = periodStats[index];
+              const point = points[index];
+
+              if (!stat || !point) {
+                return null;
+              }
+
+              return (
+                <text
+                  fill="#425D78"
+                  fontSize="12"
+                  fontWeight="700"
+                  key={stat.key}
+                  textAnchor="middle"
+                  x={point.x}
+                  y="326"
+                >
+                  {formatPeriodLabel(stat.key, groupByDay)}
+                </text>
+              );
+            })}
+
+            {activePoint && activePeriod ? (
+              <g
+                aria-hidden="true"
+                pointerEvents="none"
+                transform={`translate(${tooltipX} ${tooltipY})`}
+              >
+                <rect
+                  fill="#182B49"
+                  height={tooltipHeight}
+                  rx="7"
+                  width={tooltipWidth}
+                />
+                <text
+                  fill="#BCE8F5"
+                  fontSize="11"
+                  fontWeight="700"
+                  x="13"
+                  y="20"
+                >
+                  {formatTooltipPeriod(activePeriod.key, groupByDay)}
+                </text>
+                <text
+                  fill="#FFFFFF"
+                  fontSize="15"
+                  fontWeight="800"
+                  x="13"
+                  y="43"
+                >
+                  {formatMetricValue(activePoint.value, metric)}
+                </text>
+              </g>
+            ) : null}
+          </svg>
+        </div>
       </div>
     </section>
   );
@@ -2138,12 +2526,17 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
       getDateKey(right.createdAt).localeCompare(getDateKey(left.createdAt)),
     )[0];
 
-    return latestOrder ? getDateKey(latestOrder.createdAt).slice(0, 7) : "2026-05";
+    return latestOrder
+      ? getDateKey(latestOrder.createdAt).slice(0, 7)
+      : getRelativeDateKey(0).slice(0, 7);
   });
   const monthOptions = useMemo(() => {
-    const months = new Set(
-      orders.map((order) => getDateKey(order.createdAt).slice(0, 7)),
-    );
+    const currentMonth = getRelativeDateKey(0).slice(0, 7);
+    const months = new Set([
+      currentMonth,
+      shiftMonth(currentMonth, -1),
+      ...orders.map((order) => getDateKey(order.createdAt).slice(0, 7)),
+    ]);
 
     return Array.from(months)
       .sort((left, right) => right.localeCompare(left))
@@ -2175,19 +2568,49 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
     title: product.title,
   }));
   const maxBookings = Math.max(1, ...productStats.map((product) => product.count));
-  const groupByDay = Boolean(monthFilter || startDate || endDate);
+  const groupByDay =
+    Boolean(monthFilter) ||
+    Boolean(
+      startDate &&
+        endDate &&
+        getDayRangeLength(startDate, endDate) <= 45,
+    );
   const periodStats = useMemo(() => {
-    const buckets = new Map<string, number>();
+    const periodKeys = getStatsPeriodKeys({
+      endDate,
+      groupByDay,
+      monthFilter,
+      orders,
+      startDate,
+    });
+    const buckets = new Map<string, PeriodStat>(
+      periodKeys.map((key) => [
+        key,
+        {
+          bookings: 0,
+          key,
+          revenueCents: 0,
+        },
+      ]),
+    );
 
     filteredOrders.forEach((order) => {
       const key = getDateKey(order.createdAt).slice(0, groupByDay ? 10 : 7);
-      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+      const bucket = buckets.get(key);
+
+      if (!bucket) {
+        return;
+      }
+
+      bucket.bookings += 1;
+
+      if (order.paymentStatus === "paid") {
+        bucket.revenueCents += order.paidAmountCents;
+      }
     });
 
-    return Array.from(buckets.entries())
-      .sort(([left], [right]) => left.localeCompare(right))
-      .slice(groupByDay ? -31 : -6);
-  }, [filteredOrders, groupByDay]);
+    return Array.from(buckets.values());
+  }, [endDate, filteredOrders, groupByDay, monthFilter, orders, startDate]);
   const orderStatusStats = [
     ["new", "Nouvelles"],
     ["confirmed", "Confirmées"],
@@ -2235,14 +2658,17 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
     setStartDate("");
     setCalendarMonth(monthOptions[0]?.value ?? getRelativeDateKey(0).slice(0, 7));
   };
+  const todayKey = getRelativeDateKey(0);
+  const currentMonthKey = todayKey.slice(0, 7);
+  const previousMonthKey = shiftMonth(currentMonthKey, -1);
   const selectedPeriodLabel = monthFilter
     ? (monthOptions.find((month) => month.value === monthFilter)?.label ??
       monthFilter)
     : startDate && endDate
       ? startDate === endDate
-        ? startDate
-        : `${startDate} - ${endDate}`
-      : "Tous les mois";
+        ? formatStatsDateLabel(startDate)
+        : `${formatStatsDateLabel(startDate)} au ${formatStatsDateLabel(endDate)}`
+      : "Toutes les données";
 
   const handleMonthChange = (value: string) => {
     setEndDate("");
@@ -2258,32 +2684,66 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
   };
 
   const handleCurrentMonth = () => {
-    handleMonthChange(getRelativeDateKey(0).slice(0, 7));
+    handleMonthChange(currentMonthKey);
   };
 
   const handleToday = () => {
-    const today = getRelativeDateKey(0);
-
-    setEndDate(today);
+    setEndDate(todayKey);
     setMonthFilter("");
-    setStartDate(today);
-    setCalendarMonth(today.slice(0, 7));
+    setStartDate(todayKey);
+    setCalendarMonth(currentMonthKey);
   };
 
   const handlePreviousMonth = () => {
-    const currentMonth = new Date(`${getRelativeDateKey(0).slice(0, 7)}-01T12:00:00`);
-    currentMonth.setMonth(currentMonth.getMonth() - 1);
-
-    handleMonthChange(getLocalDateKey(currentMonth).slice(0, 7));
+    handleMonthChange(previousMonthKey);
   };
 
   const quickFilters = [
-    { label: "Aujourd'hui", onClick: handleToday },
-    { label: "7 jours", onClick: () => handlePresetRange(6) },
-    { label: "30 jours", onClick: () => handlePresetRange(29) },
-    { label: "Mois courant", onClick: handleCurrentMonth },
-    { label: "Mois dernier", onClick: handlePreviousMonth },
+    {
+      active: !monthFilter && !startDate && !endDate,
+      id: "all",
+      label: "Tout",
+      onClick: resetStatsFilters,
+    },
+    {
+      active:
+        !monthFilter && startDate === todayKey && endDate === todayKey,
+      id: "today",
+      label: "Aujourd'hui",
+      onClick: handleToday,
+    },
+    {
+      active:
+        !monthFilter &&
+        startDate === getRelativeDateKey(-6) &&
+        endDate === todayKey,
+      id: "seven-days",
+      label: "7 jours",
+      onClick: () => handlePresetRange(6),
+    },
+    {
+      active:
+        !monthFilter &&
+        startDate === getRelativeDateKey(-29) &&
+        endDate === todayKey,
+      id: "thirty-days",
+      label: "30 jours",
+      onClick: () => handlePresetRange(29),
+    },
+    {
+      active: monthFilter === currentMonthKey,
+      id: "current-month",
+      label: "Mois courant",
+      onClick: handleCurrentMonth,
+    },
+    {
+      active: monthFilter === previousMonthKey,
+      id: "previous-month",
+      label: "Mois dernier",
+      onClick: handlePreviousMonth,
+    },
   ];
+  const hasActivePeriod = Boolean(monthFilter || startDate || endDate);
 
   return (
     <div>
@@ -2291,7 +2751,7 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
         <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#182B49]">
           Stats
         </p>
-        <h1 className="mt-3 text-4xl font-semibold md:text-6xl">
+        <h1 className="mt-3 text-3xl font-semibold md:text-4xl">
           Tableau de bord
         </h1>
         <p className="mt-4 max-w-2xl leading-7 text-[#182B49]">
@@ -2300,76 +2760,107 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
         </p>
       </div>
 
-      <section className="mt-8 rounded-lg border border-[#75C7E7] bg-[#F4F8FB] p-5 shadow-sm">
-        <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
+      <section
+        className="mt-8 overflow-hidden rounded-lg border border-[#75C7E7] bg-white shadow-sm"
+        data-testid="stats-period-filters"
+      >
+        <div className="flex flex-col justify-between gap-5 bg-[#F4F8FB] px-5 py-5 md:px-6 lg:flex-row lg:items-center">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#425D78]">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#425D78]">
               Filtres
             </p>
-            <h2 className="mt-2 text-2xl font-semibold">Période</h2>
+            <h2 className="mt-1 text-2xl font-semibold">Période</h2>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[#75C7E7] bg-[#BCE8F5] px-4 py-2 text-sm font-bold text-[#182B49]">
-              {selectedPeriodLabel}
-            </span>
-          <button
-            className="min-h-10 rounded-full border border-[#75C7E7] px-4 text-sm font-bold text-[#182B49] transition hover:border-[#182B49] hover:bg-[#BCE8F5]"
-            onClick={resetStatsFilters}
-            type="button"
-          >
-              Réinitialiser
-          </button>
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="min-w-0 border-l-4 border-[#FFD35A] pl-3">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+                Affichage
+              </p>
+              <p
+                aria-live="polite"
+                className="mt-1 max-w-xl text-sm font-bold text-[#182B49]"
+              >
+                {selectedPeriodLabel}
+              </p>
+            </div>
+            {hasActivePeriod ? (
+              <button
+                aria-label="Réinitialiser les filtres de période"
+                className="min-h-10 rounded-md border border-[#75C7E7] px-4 text-sm font-bold text-[#182B49] transition hover:border-[#182B49] hover:bg-[#BCE8F5]"
+                onClick={resetStatsFilters}
+                type="button"
+              >
+                Effacer
+              </button>
+            ) : null}
           </div>
-        </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {quickFilters.map((filter) => (
-            <button
-              className="min-h-10 rounded-full border border-[#75C7E7] bg-[#F4F8FB] px-4 text-sm font-bold text-[#182B49] transition hover:border-[#182B49] hover:bg-[#FFD35A]"
-              key={filter.label}
-              onClick={filter.onClick}
-              type="button"
-            >
-              {filter.label}
-            </button>
-          ))}
         </div>
 
-        <div className="mt-5 grid gap-5 xl:grid-cols-[0.62fr_1.38fr]">
-          <div className="grid content-start gap-4 rounded-lg border border-[#75C7E7] bg-[#BCE8F5] p-4">
-          <label className="grid gap-2 text-sm font-semibold">
-            Mois
-            <select
-              className="min-h-12 rounded-md border border-[#75C7E7] bg-[#F4F8FB] px-4 font-normal outline-none transition focus:border-[#182B49]"
-              onChange={(event) => handleMonthChange(event.target.value)}
-              value={monthFilter}
-            >
-              <option value="">Tous les mois</option>
-              {monthOptions.map((month) => (
-                <option key={month.value} value={month.value}>
-                  {month.label}
-                </option>
-              ))}
-            </select>
-          </label>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-md border border-[#75C7E7] bg-[#F4F8FB] px-4 py-3">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
-                  Début
-                </p>
-                <p className="mt-2 text-sm font-bold text-[#182B49]">
-                  {startDate || "-"}
-                </p>
-              </div>
-              <div className="rounded-md border border-[#75C7E7] bg-[#F4F8FB] px-4 py-3">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
-                  Fin
-                </p>
-                <p className="mt-2 text-sm font-bold text-[#182B49]">
-                  {endDate || "-"}
-                </p>
-              </div>
-            </div>
+        <div className="border-t border-[#C7DFEA] px-5 py-4 md:px-6">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+            Raccourcis
+          </p>
+          <div
+            aria-label="Raccourcis de période"
+            className="mt-3 flex flex-wrap gap-1 rounded-md bg-[#EDF4F7] p-1"
+            role="group"
+          >
+            {quickFilters.map((filter) => (
+              <button
+                aria-pressed={filter.active}
+                className={`min-h-10 rounded px-4 text-sm font-bold transition ${
+                  filter.active
+                    ? "bg-[#182B49] text-white shadow-sm"
+                    : "text-[#182B49] hover:bg-white"
+                }`}
+                key={filter.id}
+                onClick={filter.onClick}
+                type="button"
+              >
+                {filter.label}
+              </button>
+            ))}
           </div>
+        </div>
+
+        <div className="grid border-t border-[#C7DFEA] lg:grid-cols-[320px_1fr]">
+          <div className="border-b border-[#C7DFEA] p-5 md:p-6 lg:border-r lg:border-b-0">
+            <label className="grid gap-2 text-sm font-bold text-[#182B49]">
+              Mois complet
+              <select
+                className="min-h-12 rounded-md border border-[#A9CEDD] bg-white px-4 font-normal outline-none transition focus:border-[#182B49] focus:ring-2 focus:ring-[#BCE8F5]"
+                onChange={(event) => handleMonthChange(event.target.value)}
+                value={monthFilter}
+              >
+                <option value="">Tous les mois</option>
+                {monthOptions.map((month) => (
+                  <option key={month.value} value={month.value}>
+                    {month.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <dl className="mt-6 border-y border-[#D7E6EC]">
+              <div className="flex items-center justify-between gap-4 py-3">
+                <dt className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+                  Début
+                </dt>
+                <dd className="text-right text-sm font-bold text-[#182B49]">
+                  {startDate ? formatStatsDateLabel(startDate) : "—"}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-t border-[#D7E6EC] py-3">
+                <dt className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+                  Fin
+                </dt>
+                <dd className="text-right text-sm font-bold text-[#182B49]">
+                  {endDate ? formatStatsDateLabel(endDate) : "—"}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
           <DateRangeSelector
             calendarMonth={calendarMonth}
             endDate={endDate}
@@ -2390,8 +2881,8 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
         />
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
-        <ReservationsCurve groupByDay={groupByDay} periodStats={periodStats} />
+      <div className="mt-8 grid min-w-0 gap-6 xl:grid-cols-2">
+        <ActivityCurve groupByDay={groupByDay} periodStats={periodStats} />
 
         <section className="rounded-lg border border-[#75C7E7] bg-[#F4F8FB] p-5 shadow-sm">
           <h2 className="text-2xl font-semibold">Réservations par produit</h2>
@@ -2458,80 +2949,94 @@ function DateRangeSelector({
   const weekDays = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
   const rangeEnd = endDate || startDate;
   const todayKey = getRelativeDateKey(0);
+  const selectedRangeLabel = startDate
+    ? startDate === rangeEnd
+      ? formatStatsDateLabel(startDate)
+      : `${formatStatsDateLabel(startDate)} au ${formatStatsDateLabel(rangeEnd)}`
+    : "Aucune date sélectionnée";
 
   return (
-    <div className="rounded-lg border border-[#75C7E7] bg-[#BCE8F5] p-4">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#425D78]">
-            Calendrier
-          </p>
-          <p className="mt-1 text-sm font-semibold capitalize text-[#182B49]">
-            {getMonthTitle(calendarMonth)}
-          </p>
+    <div className="px-4 py-5 sm:px-6 sm:py-6">
+      <div className="mx-auto max-w-[720px]">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+              Plage personnalisée
+            </p>
+            <h3 className="mt-1 text-lg font-semibold capitalize text-[#182B49]">
+              {getMonthTitle(calendarMonth)}
+            </h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+            <p className="text-sm font-semibold text-[#425D78]">
+              {selectedRangeLabel}
+            </p>
+            <div className="flex gap-2">
+              <button
+                aria-label="Mois précédent"
+                className="size-10 rounded-md border border-[#A9CEDD] bg-white text-lg font-bold transition hover:border-[#182B49] hover:bg-[#FFD35A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#182B49]"
+                onClick={() => setCalendarMonth(shiftMonth(calendarMonth, -1))}
+                type="button"
+              >
+                ←
+              </button>
+              <button
+                aria-label="Mois suivant"
+                className="size-10 rounded-md border border-[#A9CEDD] bg-white text-lg font-bold transition hover:border-[#182B49] hover:bg-[#FFD35A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#182B49]"
+                onClick={() => setCalendarMonth(shiftMonth(calendarMonth, 1))}
+                type="button"
+              >
+                →
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            aria-label="Mois précédent"
-            className="size-10 rounded-md border border-[#75C7E7] bg-[#F4F8FB] text-lg font-bold transition hover:border-[#182B49] hover:bg-[#FFD35A]"
-            onClick={() => setCalendarMonth(shiftMonth(calendarMonth, -1))}
-            type="button"
-          >
-            &lt;
-          </button>
-          <button
-            aria-label="Mois suivant"
-            className="size-10 rounded-md border border-[#75C7E7] bg-[#F4F8FB] text-lg font-bold transition hover:border-[#182B49] hover:bg-[#FFD35A]"
-            onClick={() => setCalendarMonth(shiftMonth(calendarMonth, 1))}
-            type="button"
-          >
-            &gt;
-          </button>
-        </div>
-      </div>
 
-      <div className="mt-4 grid grid-cols-7 gap-1 text-center">
-        {weekDays.map((day) => (
-          <span
-            className="py-2 text-xs font-bold uppercase tracking-[0.12em] text-[#182B49]"
-            key={day}
-          >
-            {day}
-          </span>
-        ))}
-        {days.map((day) => {
-          const isStart = day.key === startDate;
-          const isEnd = day.key === endDate;
-          const isToday = day.key === todayKey;
-          const isInRange =
-            Boolean(startDate && rangeEnd) &&
-            day.key >= startDate &&
-            day.key <= rangeEnd;
-
-          return (
-            <button
-              aria-pressed={isStart || isEnd || isInRange}
-              className={`min-h-11 rounded-md border text-sm font-bold transition ${
-                isStart || isEnd
-                  ? "border-[#182B49] bg-[#182B49] text-[#F4F8FB]"
-                : isInRange
-                    ? "border-[#FFD35A] bg-[#FFD35A] text-[#182B49]"
-                    : isToday
-                      ? "border-[#FFD35A] bg-[#F4F8FB] text-[#182B49] ring-2 ring-[#FFD35A]"
-                      : day.isCurrentMonth
-                      ? "border-[#75C7E7] bg-[#F4F8FB] text-[#182B49] hover:border-[#182B49]"
-                      : "border-[#BCE8F5] bg-[#BCE8F5] text-[#182B49]"
-              }`}
-              key={day.key}
-              onClick={() => onDayClick(day.key)}
-              type="button"
+        <div className="mt-5 grid grid-cols-7 gap-x-1 gap-y-2 text-center">
+          {weekDays.map((day) => (
+            <span
+              className="py-1 text-xs font-bold uppercase tracking-[0.12em] text-[#425D78]"
+              key={day}
             >
-              {day.dayOfMonth}
-            </button>
-          );
-        })}
-      </div>
+              {day}
+            </span>
+          ))}
+          {days.map((day) => {
+            const isStart = day.key === startDate;
+            const isEnd = day.key === endDate;
+            const isEndpoint = isStart || isEnd;
+            const isToday = day.key === todayKey;
+            const isInRange =
+              Boolean(startDate && rangeEnd) &&
+              day.key >= startDate &&
+              day.key <= rangeEnd;
 
+            return (
+              <button
+                aria-current={isToday ? "date" : undefined}
+                aria-label={formatStatsDateLabel(day.key)}
+                aria-pressed={isEndpoint || isInRange}
+                className={`h-10 rounded-md border text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#182B49] focus-visible:ring-offset-1 ${
+                  isEndpoint
+                    ? "border-[#182B49] bg-[#182B49] text-white ring-2 ring-[#FFD35A] ring-offset-1"
+                    : isInRange
+                      ? "border-[#D9F1F8] bg-[#D9F1F8] text-[#182B49]"
+                      : isToday
+                        ? "border-[#E3A817] bg-[#FFF8DC] text-[#182B49]"
+                        : day.isCurrentMonth
+                          ? "border-transparent bg-white text-[#182B49] hover:border-[#75C7E7] hover:bg-[#EDF8FB]"
+                          : "border-transparent bg-[#EFF4F6] text-[#7B8E9C] hover:border-[#C7DFEA]"
+                }`}
+                key={day.key}
+                onClick={() => onDayClick(day.key)}
+                type="button"
+              >
+                {day.dayOfMonth}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
