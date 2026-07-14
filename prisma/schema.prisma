@@ -42,7 +42,7 @@ model Booking {
   firstName          String?
   email              String?
   phone              String?
-  message            String?
+  message            String?      @db.Text
   preferredDate      DateTime?
   paymentStatus      String       @default("pending")
   orderStatus        String       @default("new")
