@@ -9,12 +9,15 @@ import {
 import { prisma } from "@/lib/prisma";
 import AdminDashboard from "./admin-dashboard";
 import {
+  createPromotion,
   createProduct,
+  deletePromotion,
   deleteProduct,
   disconnectGoogleCalendar,
   updateProduct,
   updateProductDatePicker,
   updateOrderStatus,
+  updatePromotion,
 } from "./actions";
 
 type AdminPageProps = {
@@ -33,6 +36,7 @@ function readInitialView(value: string | null) {
     case "calendar":
     case "datePicker":
     case "orders":
+    case "promotions":
     case "products":
     case "stats":
       return value;
@@ -60,8 +64,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     redirect("/login");
   }
 
-  const [products, orders, googleCalendarConnection, resolvedSearchParams] =
-    await Promise.all([
+  const [
+    products,
+    orders,
+    promotions,
+    googleCalendarConnection,
+    resolvedSearchParams,
+  ] = await Promise.all([
       prisma.consultation.findMany({
         include: {
           _count: {
@@ -81,9 +90,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         include: {
           consultation: {
             select: {
-              price: true,
               title: true,
             },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.promotion.findMany({
+        include: {
+          _count: {
+            select: { bookings: true },
+          },
+          products: {
+            select: { consultationId: true },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -114,7 +133,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
   return (
     <AdminDashboard
+      createPromotion={createPromotion}
       createProduct={createProduct}
+      deletePromotion={deletePromotion}
       deleteProduct={deleteProduct}
       disconnectGoogleCalendar={disconnectGoogleCalendar}
       googleCalendarNotice={readGoogleCalendarNotice(
@@ -147,7 +168,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         createdAt: order.createdAt.toISOString(),
         preferredDate: order.preferredDate?.toISOString() ?? null,
       }))}
+      promotions={promotions.map(({ products: promotionProducts, ...promotion }) => ({
+        ...promotion,
+        createdAt: promotion.createdAt.toISOString(),
+        endsAt: promotion.endsAt.toISOString(),
+        productIds: promotionProducts.map((product) => product.consultationId),
+        startsAt: promotion.startsAt.toISOString(),
+        updatedAt: promotion.updatedAt.toISOString(),
+      }))}
       updateOrderStatus={updateOrderStatus}
+      updatePromotion={updatePromotion}
       updateProductDatePicker={updateProductDatePicker}
       updateProduct={updateProduct}
       userLabel={session.user?.name ?? session.user?.email ?? "Admin Discord"}

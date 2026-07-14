@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { formatProductBadge } from "@/lib/product-labels";
+import { formatPriceFromCents } from "@/lib/promotion-pricing";
 
 type AdminProduct = {
   allowSameDayBooking: boolean;
@@ -41,8 +42,31 @@ type AdminProduct = {
 
 type ProductFormValues = Omit<AdminProduct, "bookings" | "createdAt" | "_count">;
 
+type AdminPromotion = {
+  _count: { bookings: number };
+  active: boolean;
+  allProducts: boolean;
+  bannerText: string;
+  code: string;
+  createdAt: string;
+  endsAt: string;
+  id: number;
+  percentOff: number;
+  productIds: number[];
+  startsAt: string;
+  title: string;
+  updatedAt: string;
+};
+
+type PromotionFormValues = Omit<
+  AdminPromotion,
+  "_count" | "createdAt" | "updatedAt"
+>;
+
 type AdminDashboardProps = {
+  createPromotion: (formData: FormData) => Promise<void>;
   createProduct: (formData: FormData) => Promise<void>;
+  deletePromotion: (formData: FormData) => Promise<void>;
   deleteProduct: (formData: FormData) => Promise<void>;
   disconnectGoogleCalendar: () => Promise<void>;
   googleCalendarNotice: GoogleCalendarNotice;
@@ -50,7 +74,9 @@ type AdminDashboardProps = {
   initialView: AdminView;
   orders: AdminOrder[];
   products: AdminProduct[];
+  promotions: AdminPromotion[];
   updateOrderStatus: (formData: FormData) => Promise<void>;
+  updatePromotion: (formData: FormData) => Promise<void>;
   updateProduct: (formData: FormData) => Promise<void>;
   updateProductDatePicker: (formData: FormData) => Promise<void>;
   userLabel: string;
@@ -58,7 +84,6 @@ type AdminDashboardProps = {
 
 type AdminOrder = {
   consultation: {
-    price: number;
     title: string;
   };
   consultationId: number;
@@ -71,7 +96,11 @@ type AdminOrder = {
   phone: string | null;
   orderStatus: string;
   paymentStatus: string;
+  paidAmountCents: number;
   preferredDate: string | null;
+  promotionCode: string | null;
+  discountPercent: number | null;
+  originalPriceCents: number;
   stripeSessionId: string | null;
 };
 
@@ -93,6 +122,7 @@ type GoogleCalendarStatus = {
 
 type AdminView =
   | "products"
+  | "promotions"
   | "datePicker"
   | "orders"
   | "stats"
@@ -107,6 +137,11 @@ const adminViews: Array<{
     description: "Catalogue, prix et fiches publiques",
     id: "products",
     label: "Produits",
+  },
+  {
+    description: "Codes, réductions et bandeau public",
+    id: "promotions",
+    label: "Promotions",
   },
   {
     description: "Créneaux, fermetures et calendrier",
@@ -157,7 +192,9 @@ const emptyProduct: ProductFormValues = {
 };
 
 export default function AdminDashboard({
+  createPromotion,
   createProduct,
+  deletePromotion,
   deleteProduct,
   disconnectGoogleCalendar,
   googleCalendarNotice,
@@ -165,7 +202,9 @@ export default function AdminDashboard({
   initialView,
   orders,
   products,
+  promotions,
   updateOrderStatus,
+  updatePromotion,
   updateProduct,
   updateProductDatePicker,
   userLabel,
@@ -173,9 +212,11 @@ export default function AdminDashboard({
   const [activeView, setActiveView] = useState<AdminView>(initialView);
   const [selectedProduct, setSelectedProduct] =
     useState<ProductFormValues | null>(null);
+  const [selectedPromotion, setSelectedPromotion] =
+    useState<PromotionFormValues | null>(null);
   const paidRevenue = orders.reduce(
     (sum, order) =>
-      order.paymentStatus === "paid" ? sum + order.consultation.price : sum,
+      order.paymentStatus === "paid" ? sum + order.paidAmountCents : sum,
     0,
   );
   const newOrders = orders.filter((order) => order.orderStatus === "new").length;
@@ -262,7 +303,7 @@ export default function AdminDashboard({
           </article>
           <article>
             <span>CA payé</span>
-            <strong>{paidRevenue}€</strong>
+            <strong>{formatPriceFromCents(paidRevenue)}</strong>
           </article>
         </div>
 
@@ -275,6 +316,18 @@ export default function AdminDashboard({
               selectedProduct={selectedProduct}
               setSelectedProduct={setSelectedProduct}
               updateProduct={updateProduct}
+            />
+          ) : null}
+
+          {activeView === "promotions" ? (
+            <PromotionsPanel
+              createPromotion={createPromotion}
+              deletePromotion={deletePromotion}
+              products={products}
+              promotions={promotions}
+              selectedPromotion={selectedPromotion}
+              setSelectedPromotion={setSelectedPromotion}
+              updatePromotion={updatePromotion}
             />
           ) : null}
 
@@ -436,6 +489,418 @@ function GoogleCalendarPanel({
           </form>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+type PromotionsPanelProps = {
+  createPromotion: (formData: FormData) => Promise<void>;
+  deletePromotion: (formData: FormData) => Promise<void>;
+  products: AdminProduct[];
+  promotions: AdminPromotion[];
+  selectedPromotion: PromotionFormValues | null;
+  setSelectedPromotion: (promotion: PromotionFormValues | null) => void;
+  updatePromotion: (formData: FormData) => Promise<void>;
+};
+
+function toDateTimeLocalValue(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toIsoDateTimeValue(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function createEmptyPromotion(): PromotionFormValues {
+  const startsAt = new Date();
+  startsAt.setSeconds(0, 0);
+  startsAt.setMinutes(Math.ceil(startsAt.getMinutes() / 15) * 15);
+  const endsAt = new Date(startsAt);
+  endsAt.setDate(endsAt.getDate() + 7);
+
+  return {
+    active: true,
+    allProducts: true,
+    bannerText: "Offre limitée sur les guidances sélectionnées",
+    code: "",
+    endsAt: endsAt.toISOString(),
+    id: 0,
+    percentOff: 15,
+    productIds: [],
+    startsAt: startsAt.toISOString(),
+    title: "Offre spéciale",
+  };
+}
+
+function getPromotionStatus(promotion: AdminPromotion) {
+  const now = Date.now();
+
+  if (!promotion.active) {
+    return {
+      className: "bg-[#E7EDF3] text-[#425D78]",
+      label: "En pause",
+    };
+  }
+
+  if (new Date(promotion.startsAt).getTime() > now) {
+    return {
+      className: "bg-[#FFF4CF] text-[#7A5A00]",
+      label: "Planifiée",
+    };
+  }
+
+  if (new Date(promotion.endsAt).getTime() <= now) {
+    return {
+      className: "bg-[#FBE9E9] text-[#8A2828]",
+      label: "Terminée",
+    };
+  }
+
+  return {
+    className: "bg-[#E1F4EA] text-[#155D43]",
+    label: "En ligne",
+  };
+}
+
+function formatPromotionDate(value: string) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function PromotionsPanel({
+  createPromotion,
+  deletePromotion,
+  products,
+  promotions,
+  selectedPromotion,
+  setSelectedPromotion,
+  updatePromotion,
+}: PromotionsPanelProps) {
+  return (
+    <div>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#182B49]">
+            Promotions
+          </p>
+          <h1 className="mt-3 text-4xl font-semibold md:text-6xl">
+            Codes et offres
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-[#425D78]">
+            Programme une réduction, choisis les produits et publie le texte du
+            bandeau affiché au-dessus du site.
+          </p>
+        </div>
+        <button
+          className="min-h-12 rounded-full bg-[#182B49] px-6 text-sm font-bold text-[#F4F8FB] transition hover:bg-[#29496F]"
+          onClick={() => setSelectedPromotion(createEmptyPromotion())}
+          type="button"
+        >
+          Nouvelle promotion
+        </button>
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
+        <div className="grid content-start gap-4">
+          {promotions.map((promotion) => {
+            const status = getPromotionStatus(promotion);
+
+            return (
+              <button
+                className={`rounded-lg border p-5 text-left shadow-sm transition ${
+                  selectedPromotion?.id === promotion.id
+                    ? "border-[#182B49] bg-[#BCE8F5]"
+                    : "border-[#75C7E7] bg-[#F4F8FB] hover:border-[#182B49]"
+                }`}
+                key={promotion.id}
+                onClick={() =>
+                  setSelectedPromotion({
+                    active: promotion.active,
+                    allProducts: promotion.allProducts,
+                    bannerText: promotion.bannerText,
+                    code: promotion.code,
+                    endsAt: promotion.endsAt,
+                    id: promotion.id,
+                    percentOff: promotion.percentOff,
+                    productIds: promotion.productIds,
+                    startsAt: promotion.startsAt,
+                    title: promotion.title,
+                  })
+                }
+                type="button"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="rounded-full bg-[#182B49] px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-[#FFD35A]">
+                    {promotion.code}
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-bold ${status.className}`}
+                  >
+                    {status.label}
+                  </span>
+                </div>
+                <div className="mt-4 flex items-end justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-semibold">{promotion.title}</h2>
+                    <p className="mt-2 text-sm font-semibold text-[#425D78]">
+                      Jusqu&apos;au {formatPromotionDate(promotion.endsAt)}
+                    </p>
+                  </div>
+                  <strong className="text-3xl text-[#182B49]">
+                    -{promotion.percentOff}%
+                  </strong>
+                </div>
+                <p className="mt-4 text-xs font-bold uppercase tracking-[0.14em] text-[#425D78]">
+                  {promotion.allProducts
+                    ? "Tous les produits"
+                    : `${promotion.productIds.length} produit${
+                        promotion.productIds.length > 1 ? "s" : ""
+                      }`} · {promotion._count.bookings} utilisation
+                  {promotion._count.bookings > 1 ? "s" : ""}
+                </p>
+              </button>
+            );
+          })}
+
+          {promotions.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[#75C7E7] bg-[#F4F8FB] p-6 text-sm font-semibold leading-6 text-[#425D78]">
+              Aucune promotion pour le moment. Crée la première offre depuis le
+              bouton ci-dessus.
+            </div>
+          ) : null}
+        </div>
+
+        <div className="min-h-[560px] rounded-lg border border-[#75C7E7] bg-[#F4F8FB] p-5 shadow-sm">
+          {selectedPromotion ? (
+            <PromotionForm
+              action={
+                selectedPromotion.id ? updatePromotion : createPromotion
+              }
+              deletePromotion={deletePromotion}
+              key={selectedPromotion.id || "new-promotion"}
+              products={products}
+              promotion={selectedPromotion}
+              setSelectedPromotion={setSelectedPromotion}
+            />
+          ) : (
+            <div className="grid min-h-[510px] place-items-center text-center">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#182B49]">
+                  Programmation
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold">
+                  Choisis une promotion
+                </h2>
+                <p className="mt-3 max-w-md leading-7 text-[#425D78]">
+                  Modifie une offre existante ou prépare un nouveau code avec
+                  ses dates de publication.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromotionForm({
+  action,
+  deletePromotion,
+  products,
+  promotion,
+  setSelectedPromotion,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  deletePromotion: (formData: FormData) => Promise<void>;
+  products: AdminProduct[];
+  promotion: PromotionFormValues;
+  setSelectedPromotion: (promotion: PromotionFormValues | null) => void;
+}) {
+  const isEditing = Boolean(promotion.id);
+  const [allProducts, setAllProducts] = useState(promotion.allProducts);
+  const [startsAt, setStartsAt] = useState(
+    toDateTimeLocalValue(promotion.startsAt),
+  );
+  const [endsAt, setEndsAt] = useState(
+    toDateTimeLocalValue(promotion.endsAt),
+  );
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#182B49]">
+            {isEditing ? "Modifier" : "Création"}
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold">
+            {isEditing ? promotion.title : "Nouvelle promotion"}
+          </h2>
+        </div>
+        <button
+          className="rounded-full border border-[#75C7E7] px-4 py-2 text-sm font-bold text-[#182B49] transition hover:border-[#182B49]"
+          onClick={() => setSelectedPromotion(null)}
+          type="button"
+        >
+          Fermer
+        </button>
+      </div>
+
+      <form action={action} className="mt-6 grid gap-4 md:grid-cols-2">
+        {isEditing ? <input name="id" type="hidden" value={promotion.id} /> : null}
+        <input name="startsAt" type="hidden" value={toIsoDateTimeValue(startsAt)} />
+        <input name="endsAt" type="hidden" value={toIsoDateTimeValue(endsAt)} />
+
+        <label className="grid gap-2 text-sm font-semibold">
+          Code promotionnel
+          <input
+            className="min-h-12 rounded-md border border-[#75C7E7] bg-white px-4 font-black uppercase outline-none transition focus:border-[#182B49]"
+            defaultValue={promotion.code}
+            maxLength={32}
+            name="code"
+            pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,31}"
+            placeholder="ETE20"
+            required
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-semibold">
+          Réduction
+          <span className="relative">
+            <input
+              className="min-h-12 w-full rounded-md border border-[#75C7E7] bg-white px-4 pr-10 font-normal outline-none transition focus:border-[#182B49]"
+              defaultValue={promotion.percentOff}
+              max="90"
+              min="1"
+              name="percentOff"
+              required
+              type="number"
+            />
+            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-black text-[#425D78]">
+              %
+            </span>
+          </span>
+        </label>
+        <label className="grid gap-2 text-sm font-semibold md:col-span-2">
+          Nom interne
+          <input
+            className="min-h-12 rounded-md border border-[#75C7E7] bg-white px-4 font-normal outline-none transition focus:border-[#182B49]"
+            defaultValue={promotion.title}
+            maxLength={120}
+            name="title"
+            required
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-semibold md:col-span-2">
+          Texte du bandeau public
+          <textarea
+            className="min-h-24 rounded-md border border-[#75C7E7] bg-white px-4 py-3 font-normal leading-6 outline-none transition focus:border-[#182B49]"
+            defaultValue={promotion.bannerText}
+            maxLength={191}
+            name="bannerText"
+            required
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-semibold">
+          Début
+          <input
+            className="min-h-12 rounded-md border border-[#75C7E7] bg-white px-4 font-normal outline-none transition focus:border-[#182B49]"
+            onChange={(event) => setStartsAt(event.target.value)}
+            required
+            type="datetime-local"
+            value={startsAt}
+          />
+        </label>
+        <label className="grid gap-2 text-sm font-semibold">
+          Fin
+          <input
+            className="min-h-12 rounded-md border border-[#75C7E7] bg-white px-4 font-normal outline-none transition focus:border-[#182B49]"
+            min={startsAt}
+            onChange={(event) => setEndsAt(event.target.value)}
+            required
+            type="datetime-local"
+            value={endsAt}
+          />
+        </label>
+
+        <label className="flex min-h-12 items-center justify-between gap-4 rounded-md border border-[#75C7E7] bg-[#EAF7FC] px-4 text-sm font-semibold md:col-span-2">
+          <span>
+            Promotion active
+            <small className="mt-1 block font-normal text-[#425D78]">
+              Le bandeau et la réduction respectent aussi les dates ci-dessus.
+            </small>
+          </span>
+          <input
+            className="size-5 accent-[#182B49]"
+            defaultChecked={promotion.active}
+            name="active"
+            type="checkbox"
+          />
+        </label>
+
+        <fieldset className="grid gap-3 rounded-md border border-[#75C7E7] bg-[#EAF7FC] p-4 md:col-span-2">
+          <legend className="px-2 text-sm font-semibold">Produits concernés</legend>
+          <label className="flex items-center gap-3 text-sm font-bold">
+            <input
+              checked={allProducts}
+              className="size-5 accent-[#182B49]"
+              name="allProducts"
+              onChange={(event) => setAllProducts(event.target.checked)}
+              type="checkbox"
+            />
+            Tous les produits
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {products.map((product) => (
+              <label
+                className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm font-semibold ${
+                  allProducts
+                    ? "border-[#D7E4EC] bg-[#F4F8FB] text-[#7A8C9D]"
+                    : "border-[#75C7E7] bg-white text-[#182B49]"
+                }`}
+                key={product.id}
+              >
+                <input
+                  className="size-4 accent-[#182B49]"
+                  defaultChecked={promotion.productIds.includes(product.id)}
+                  disabled={allProducts}
+                  name="productIds"
+                  type="checkbox"
+                  value={product.id}
+                />
+                <span className="min-w-0 truncate">{product.title}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <button
+          className="min-h-12 rounded-full bg-[#182B49] px-5 text-sm font-bold text-white transition hover:bg-[#29496F] md:col-span-2"
+          type="submit"
+        >
+          {isEditing ? "Enregistrer la promotion" : "Créer la promotion"}
+        </button>
+      </form>
+
+      {isEditing ? (
+        <form action={deletePromotion} className="mt-3">
+          <input name="id" type="hidden" value={promotion.id} />
+          <button
+            className="min-h-11 w-full rounded-full border border-[#C24D4D] px-5 text-sm font-bold text-[#8A2828] transition hover:bg-[#FFF1F1]"
+            type="submit"
+          >
+            Supprimer la promotion
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -1301,8 +1766,25 @@ function OrdersPanel({
                   </p>
                   <p>
                     <span className="font-semibold text-[#182B49]">Montant :</span>{" "}
-                    {order.consultation.price} EUR
+                    {order.discountPercent ? (
+                      <>
+                        <del className="mr-2 text-[#7A8C9D]">
+                          {formatPriceFromCents(order.originalPriceCents)}
+                        </del>
+                        <strong>{formatPriceFromCents(order.paidAmountCents)}</strong>
+                      </>
+                    ) : (
+                      formatPriceFromCents(order.paidAmountCents)
+                    )}
                   </p>
+                  {order.promotionCode ? (
+                    <p>
+                      <span className="font-semibold text-[#182B49]">
+                        Code promo :
+                      </span>{" "}
+                      {order.promotionCode} (-{order.discountPercent}%)
+                    </p>
+                  ) : null}
                 </div>
                 {order.message ? (
                   <p className="mt-3 rounded-md bg-[#BCE8F5] px-4 py-3 text-sm text-[#182B49]">
@@ -1679,11 +2161,11 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
   );
   const paidRevenue = filteredOrders.reduce(
     (sum, order) =>
-      order.paymentStatus === "paid" ? sum + order.consultation.price : sum,
+      order.paymentStatus === "paid" ? sum + order.paidAmountCents : sum,
     0,
   );
   const potentialRevenue = filteredOrders.reduce(
-    (sum, order) => sum + order.consultation.price,
+    (sum, order) => sum + order.originalPriceCents,
     0,
   );
   const productStats = products.map((product) => ({
@@ -1901,8 +2383,11 @@ function StatsPanel({ orders, products }: StatsPanelProps) {
       <div className="mt-8 grid gap-4 md:grid-cols-4">
         <StatCard label="Produits" value={products.length} />
         <StatCard label="Réservations" value={filteredOrders.length} />
-        <StatCard label="CA payé" value={`${paidRevenue} EUR`} />
-        <StatCard label="CA potentiel" value={`${potentialRevenue} EUR`} />
+        <StatCard label="CA payé" value={formatPriceFromCents(paidRevenue)} />
+        <StatCard
+          label="CA potentiel"
+          value={formatPriceFromCents(potentialRevenue)}
+        />
       </div>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-2">

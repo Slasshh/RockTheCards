@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import type { PhoneCountryOption } from "@/lib/phone-number";
+import { formatPriceFromCents } from "@/lib/promotion-pricing";
 import type { BookingState } from "./actions";
 import DatePicker, { getSelectedHour } from "./date-picker";
 import PhoneCountryPicker from "./phone-country-picker";
@@ -26,6 +27,12 @@ type ProductBookingFormProps = {
   disabledMonthDays: number[];
   disabledWeekdays: number[];
   phoneCountryOptions: readonly PhoneCountryOption[];
+  promotion: {
+    code: string;
+    discountedPriceCents: number;
+    originalPriceCents: number;
+    percentOff: number;
+  } | null;
   slotDurationMinutes: number;
 };
 
@@ -51,6 +58,7 @@ export default function ProductBookingForm({
   disabledMonthDays,
   disabledWeekdays,
   phoneCountryOptions,
+  promotion,
   slotDurationMinutes,
 }: ProductBookingFormProps) {
   const [selectedDate, setSelectedDate] = useState("");
@@ -94,6 +102,41 @@ export default function ProductBookingForm({
       </div>
 
       <input name="consultationId" type="hidden" value={consultationId} />
+
+      {promotion ? (
+        <div className="product-booking-promotion md:col-span-2">
+          <div className="product-booking-promotion-price">
+            <span>Offre en cours · -{promotion.percentOff}%</span>
+            <p>
+              <del>{formatPriceFromCents(promotion.originalPriceCents)}</del>
+              <strong>
+                {formatPriceFromCents(promotion.discountedPriceCents)}
+              </strong>
+            </p>
+          </div>
+          <label>
+            Code promotionnel
+            <input
+              autoComplete="off"
+              defaultValue={promotion.code}
+              maxLength={32}
+              name="promotionCode"
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,31}"
+            />
+          </label>
+        </div>
+      ) : (
+        <label className="grid gap-2 text-sm font-bold md:col-span-2">
+          Code promotionnel <span className="sr-only">facultatif</span>
+          <input
+            autoComplete="off"
+            maxLength={32}
+            name="promotionCode"
+            pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,31}"
+            placeholder="Code promo (facultatif)"
+          />
+        </label>
+      )}
 
       {enabledFields.includes("firstName") ? (
         <label className="grid gap-2 text-sm font-bold" suppressHydrationWarning>

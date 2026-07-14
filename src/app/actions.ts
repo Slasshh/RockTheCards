@@ -10,6 +10,12 @@ import {
 } from "@/lib/booking-slots";
 import { parseCustomerPhoneNumber } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateDiscountedPriceCents,
+  MIN_CHECKOUT_AMOUNT_CENTS,
+  normalizePromotionCode,
+} from "@/lib/promotion-pricing";
+import { getApplicablePromotionByCode } from "@/lib/promotions";
 import { getStripe } from "@/lib/stripe";
 
 const STRIPE_METADATA_CHUNK_SIZE = 450;
@@ -44,6 +50,9 @@ export async function createBooking(
   const phoneCountry = String(formData.get("phoneCountry") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim();
   const preferredDateValue = String(formData.get("preferredDate") ?? "");
+  const promotionCode = normalizePromotionCode(
+    String(formData.get("promotionCode") ?? ""),
+  );
 
   if (!consultationId || !message) {
     return {
@@ -193,15 +202,50 @@ export async function createBooking(
       }
     }
 
+    const promotion = promotionCode
+      ? await getApplicablePromotionByCode(promotionCode, consultationId)
+      : null;
+
+    if (promotionCode && !promotion) {
+      return {
+        ok: false,
+        message:
+          "Ce code promotionnel est invalide, expiré ou indisponible pour ce produit.",
+      };
+    }
+
+    const originalPriceCents = consultation.price * 100;
+    const paidAmountCents = promotion
+      ? calculateDiscountedPriceCents(
+          originalPriceCents,
+          promotion.percentOff,
+        )
+      : originalPriceCents;
+
+    if (
+      !Number.isSafeInteger(originalPriceCents) ||
+      paidAmountCents < MIN_CHECKOUT_AMOUNT_CENTS
+    ) {
+      return {
+        ok: false,
+        message: "Cette réduction ne peut pas être appliquée à ce produit.",
+      };
+    }
+
     const messageChunks = splitMetadataValue(message);
     const metadata: Record<string, string> = {
       consultationId: String(consultationId),
+      discountPercent: String(promotion?.percentOff ?? 0),
       email,
       firstName,
       messageChunkCount: String(messageChunks.length),
       name,
+      originalPriceCents: String(originalPriceCents),
+      paidAmountCents: String(paidAmountCents),
       phone: phoneNumber?.number ?? "",
       preferredDate: preferredDate?.toISOString() ?? "",
+      promotionCode: promotion?.code ?? "",
+      promotionId: promotion ? String(promotion.id) : "",
     };
 
     messageChunks.forEach((chunk, index) => {
@@ -220,9 +264,12 @@ export async function createBooking(
           price_data: {
             currency: "eur",
             product_data: {
+              description: promotion
+                ? `Code ${promotion.code} : -${promotion.percentOff}%`
+                : undefined,
               name: consultation.title,
             },
-            unit_amount: consultation.price * 100,
+            unit_amount: paidAmountCents,
           },
           quantity: 1,
         },

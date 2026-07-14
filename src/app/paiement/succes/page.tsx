@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import type { CSSProperties } from "react";
 import HomeNavbar from "@/app/home-navbar";
 import { prisma } from "@/lib/prisma";
+import { formatPriceFromCents } from "@/lib/promotion-pricing";
 
 function formatDate(date: Date | null) {
   if (!date) {
@@ -110,10 +111,25 @@ export default async function PaymentSuccessPage({
               <span>Moment</span>
               <strong>{formatDate(booking?.preferredDate ?? null)}</strong>
             </div>
-            {booking?.consultation.price ? (
+            {booking ? (
               <div style={{ "--success-delay": "320ms" } as CSSProperties}>
                 <span>Montant</span>
-                <strong>{booking.consultation.price} EUR</strong>
+                <strong>
+                  {booking.discountPercent ? (
+                    <del className="mr-2 text-[#7A8C9D]">
+                      {formatPriceFromCents(booking.originalPriceCents)}
+                    </del>
+                  ) : null}
+                  {formatPriceFromCents(booking.paidAmountCents)}
+                </strong>
+              </div>
+            ) : null}
+            {booking?.promotionCode ? (
+              <div style={{ "--success-delay": "400ms" } as CSSProperties}>
+                <span>Code promotionnel</span>
+                <strong>
+                  {booking.promotionCode} (-{booking.discountPercent}%)
+                </strong>
               </div>
             ) : null}
           </div>

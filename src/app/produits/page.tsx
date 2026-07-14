@@ -4,18 +4,28 @@ import type { CSSProperties } from "react";
 import HomeNavbar from "@/app/home-navbar";
 import { formatProductBadge } from "@/lib/product-labels";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateDiscountedPriceCents,
+  formatPriceFromCents,
+  selectBestPromotion,
+} from "@/lib/promotion-pricing";
+import { getActivePublicPromotions } from "@/lib/promotions";
 
 export default async function ProduitsPage() {
   await connection();
 
-  const consultations = await prisma.consultation.findMany({
-    orderBy: { sortOrder: "asc" },
-  });
+  const now = new Date();
+  const [consultations, activePromotions] = await Promise.all([
+    prisma.consultation.findMany({
+      orderBy: { sortOrder: "asc" },
+    }),
+    getActivePublicPromotions(now),
+  ]);
 
   return (
     <main className="min-h-screen bg-[#F4F8FB] text-[#182B49]">
       <section className="products-hero relative overflow-hidden bg-[#182B49] px-5 pb-20 pt-28 text-[#F4F8FB] md:px-8 md:pt-32 lg:px-10">
-        <HomeNavbar />
+        <HomeNavbar promotion={activePromotions[0] ?? null} />
         <div className="products-star products-star-a" aria-hidden="true" />
         <div className="products-star products-star-b" aria-hidden="true" />
         <div className="products-star products-star-c" aria-hidden="true" />
@@ -69,50 +79,80 @@ export default async function ProduitsPage() {
 
           {consultations.length > 0 ? (
             <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-              {consultations.map((consultation, index) => (
-                <Link
-                  className="products-card group"
-                  href={`/produits/${consultation.slug}`}
-                  key={consultation.id}
-                  style={{ "--product-delay": `${index * 80}ms` } as CSSProperties}
-                >
-                  <div className="products-card-media">
-                    <div
-                      className="products-card-image"
-                      style={{
-                        backgroundImage: `url(${consultation.imageUrl || "/card-spread.svg"})`,
-                      }}
-                    />
-                    <span className="products-card-badge">
-                      {formatProductBadge(consultation.badge)}
-                    </span>
-                  </div>
-                  <div className="flex flex-1 flex-col p-6">
-                    <div className="flex items-center justify-between gap-3 text-sm font-semibold text-[#425D78]">
-                      <span>
-                        {consultation.duration
-                          ? `${consultation.duration} min`
-                          : "Guidance"}
+              {consultations.map((consultation, index) => {
+                const promotion = selectBestPromotion(
+                  activePromotions,
+                  consultation.id,
+                  now,
+                );
+                const originalPriceCents = consultation.price * 100;
+                const discountedPriceCents = promotion
+                  ? calculateDiscountedPriceCents(
+                      originalPriceCents,
+                      promotion.percentOff,
+                    )
+                  : originalPriceCents;
+
+                return (
+                  <Link
+                    className="products-card group"
+                    href={`/produits/${consultation.slug}`}
+                    key={consultation.id}
+                    style={
+                      { "--product-delay": `${index * 80}ms` } as CSSProperties
+                    }
+                  >
+                    <div className="products-card-media">
+                      <div
+                        className="products-card-image"
+                        style={{
+                          backgroundImage: `url(${consultation.imageUrl || "/card-spread.svg"})`,
+                        }}
+                      />
+                      <span className="products-card-badge">
+                        {formatProductBadge(consultation.badge)}
                       </span>
-                      <span>{consultation.price} EUR</span>
+                      {promotion ? (
+                        <span className="products-card-discount">
+                          -{promotion.percentOff}%
+                        </span>
+                      ) : null}
                     </div>
-                    <h3 className="mt-6 text-2xl font-semibold leading-tight text-[#182B49]">
-                      {consultation.title}
-                    </h3>
-                    <p className="mt-4 flex-1 text-sm leading-6 text-[#425D78]">
-                      {consultation.summary}
-                    </p>
-                    <div className="mt-6 flex items-center justify-between">
-                      <span className="text-3xl font-bold text-[#182B49]">
-                        {consultation.price}€
-                      </span>
-                      <span className="products-card-action">
-                        Ouvrir
-                      </span>
+                    <div className="flex flex-1 flex-col p-6">
+                      <div className="flex items-center justify-between gap-3 text-sm font-semibold text-[#425D78]">
+                        <span>
+                          {consultation.duration
+                            ? `${consultation.duration} min`
+                            : "Guidance"}
+                        </span>
+                        <span>{formatPriceFromCents(discountedPriceCents)}</span>
+                      </div>
+                      <h3 className="mt-6 text-2xl font-semibold leading-tight text-[#182B49]">
+                        {consultation.title}
+                      </h3>
+                      <p className="mt-4 flex-1 text-sm leading-6 text-[#425D78]">
+                        {consultation.summary}
+                      </p>
+                      {promotion ? (
+                        <p className="products-card-promo-code">
+                          Code {promotion.code}
+                        </p>
+                      ) : null}
+                      <div className="mt-6 flex items-end justify-between gap-3">
+                        <span className="products-card-price">
+                          {promotion ? (
+                            <del>{formatPriceFromCents(originalPriceCents)}</del>
+                          ) : null}
+                          <strong>
+                            {formatPriceFromCents(discountedPriceCents)}
+                          </strong>
+                        </span>
+                        <span className="products-card-action">Ouvrir</span>
+                      </div>
                     </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           ) : (
             <div className="products-empty mt-10">

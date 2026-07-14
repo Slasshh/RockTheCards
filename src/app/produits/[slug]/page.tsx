@@ -7,6 +7,12 @@ import ProductBookingForm from "@/app/product-booking-form";
 import { PHONE_COUNTRY_OPTIONS } from "@/lib/phone-number";
 import { formatProductBadge } from "@/lib/product-labels";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateDiscountedPriceCents,
+  formatPriceFromCents,
+  selectBestPromotion,
+} from "@/lib/promotion-pricing";
+import { getActivePublicPromotions } from "@/lib/promotions";
 
 function toDateTimeLocalValue(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -55,13 +61,30 @@ export default async function ProductPage({
   await connection();
 
   const { slug } = await params;
-  const consultation = await prisma.consultation.findUnique({
-    where: { slug },
-  });
+  const now = new Date();
+  const [consultation, activePromotions] = await Promise.all([
+    prisma.consultation.findUnique({
+      where: { slug },
+    }),
+    getActivePublicPromotions(now),
+  ]);
 
   if (!consultation) {
     notFound();
   }
+
+  const promotion = selectBestPromotion(
+    activePromotions,
+    consultation.id,
+    now,
+  );
+  const originalPriceCents = consultation.price * 100;
+  const discountedPriceCents = promotion
+    ? calculateDiscountedPriceCents(
+        originalPriceCents,
+        promotion.percentOff,
+      )
+    : originalPriceCents;
 
   const bookedSlots = (
     await prisma.booking.findMany({
@@ -76,7 +99,7 @@ export default async function ProductPage({
   return (
     <main className="min-h-screen bg-[#F4F8FB] text-[#182B49]">
       <section className="product-detail-hero relative overflow-hidden px-5 pb-20 pt-28 text-[#F4F8FB] md:px-8 md:pb-24 md:pt-32 lg:px-10">
-        <HomeNavbar />
+        <HomeNavbar promotion={activePromotions[0] ?? null} />
         <span className="products-star product-detail-star-a" />
         <span className="products-star product-detail-star-b" />
         <span className="products-star product-detail-star-c" />
@@ -99,7 +122,17 @@ export default async function ProductPage({
             <div className="product-detail-meta-grid mt-9">
               <div className="product-detail-meta-card">
                 <span>Prix</span>
-                <strong>{consultation.price} EUR</strong>
+                <strong className="product-detail-price">
+                  {promotion ? (
+                    <del>{formatPriceFromCents(originalPriceCents)}</del>
+                  ) : null}
+                  <span>{formatPriceFromCents(discountedPriceCents)}</span>
+                </strong>
+                {promotion ? (
+                  <small>
+                    -{promotion.percentOff}% avec le code {promotion.code}
+                  </small>
+                ) : null}
               </div>
               <div className="product-detail-meta-card">
                 <span>Durée</span>
@@ -142,6 +175,16 @@ export default async function ProductPage({
                 consultation.disabledWeekdays,
               )}
               phoneCountryOptions={PHONE_COUNTRY_OPTIONS}
+              promotion={
+                promotion
+                  ? {
+                      code: promotion.code,
+                      discountedPriceCents,
+                      originalPriceCents,
+                      percentOff: promotion.percentOff,
+                    }
+                  : null
+              }
               slotDurationMinutes={consultation.slotDurationMinutes}
             />
           </div>

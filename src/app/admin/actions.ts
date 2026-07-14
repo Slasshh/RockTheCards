@@ -4,12 +4,19 @@ import { getServerSession } from "next-auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/auth-options";
+import { Prisma } from "@/generated/prisma/client";
 import {
   createGoogleOAuthClient,
   decryptGoogleRefreshToken,
   GOOGLE_CALENDAR_CONNECTION_ID,
 } from "@/lib/google-calendar-oauth";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateDiscountedPriceCents,
+  isValidPromotionCode,
+  MIN_CHECKOUT_AMOUNT_CENTS,
+  normalizePromotionCode,
+} from "@/lib/promotion-pricing";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -81,6 +88,45 @@ function readOptionalIntegerField(
   return readString(formData, name)
     ? readIntegerField(formData, name, label, options)
     : null;
+}
+
+function readDateField(formData: FormData, name: string, label: string) {
+  const rawValue = readString(formData, name);
+  const date = new Date(rawValue);
+
+  if (!rawValue || Number.isNaN(date.getTime())) {
+    throw new Error(`${label} invalide`);
+  }
+
+  return date;
+}
+
+function readIntegerFields(
+  formData: FormData,
+  name: string,
+  label: string,
+) {
+  const values = formData
+    .getAll(name)
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+  const ids = new Set<number>();
+
+  for (const value of values) {
+    if (!/^\d+$/.test(value)) {
+      throw new Error(`${label} invalide`);
+    }
+
+    const id = Number(value);
+
+    if (!Number.isSafeInteger(id) || id < 1) {
+      throw new Error(`${label} invalide`);
+    }
+
+    ids.add(id);
+  }
+
+  return Array.from(ids);
 }
 
 function readCustomerFields(formData: FormData) {
@@ -251,6 +297,194 @@ function readProductForm(formData: FormData) {
     customerFields,
     unavailableText: unavailableText || null,
   };
+}
+
+function readPromotionForm(formData: FormData) {
+  const code = normalizePromotionCode(readString(formData, "code"));
+  const title = readString(formData, "title");
+  const bannerText = readString(formData, "bannerText");
+  const percentOff = readIntegerField(
+    formData,
+    "percentOff",
+    "Réduction",
+    { min: 1, max: 90 },
+  );
+  const startsAt = readDateField(formData, "startsAt", "Début");
+  const endsAt = readDateField(formData, "endsAt", "Fin");
+  const allProducts = formData.get("allProducts") === "on";
+  const productIds = readIntegerFields(
+    formData,
+    "productIds",
+    "Produits sélectionnés",
+  );
+
+  if (!isValidPromotionCode(code)) {
+    throw new Error(
+      "Le code doit contenir 3 à 32 lettres, chiffres, tirets ou underscores.",
+    );
+  }
+
+  if (!title || title.length > 120) {
+    throw new Error("Le titre de la promotion est invalide.");
+  }
+
+  if (!bannerText || bannerText.length > 191) {
+    throw new Error("Le texte du bandeau est invalide.");
+  }
+
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    throw new Error("La fin de la promotion doit être après son début.");
+  }
+
+  if (!allProducts && productIds.length === 0) {
+    throw new Error("Sélectionne au moins un produit.");
+  }
+
+  return {
+    active: formData.get("active") === "on",
+    allProducts,
+    bannerText,
+    code,
+    endsAt,
+    percentOff,
+    productIds: allProducts ? [] : productIds,
+    startsAt,
+    title,
+  };
+}
+
+function revalidatePromotionPages() {
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/produits");
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
+}
+
+async function validatePromotionProducts(
+  productIds: number[],
+  allProducts: boolean,
+  percentOff: number,
+) {
+  const products = await prisma.consultation.findMany({
+    select: { id: true, price: true },
+    where: allProducts ? {} : { id: { in: productIds } },
+  });
+
+  if (!allProducts && products.length !== productIds.length) {
+    throw new Error("Un produit sélectionné n'existe plus.");
+  }
+
+  if (
+    products.some(
+      (product) =>
+        calculateDiscountedPriceCents(product.price * 100, percentOff) <
+        MIN_CHECKOUT_AMOUNT_CENTS,
+    )
+  ) {
+    throw new Error(
+      "La réduction fait passer un produit sous le minimum de paiement Stripe.",
+    );
+  }
+}
+
+export async function createPromotion(formData: FormData) {
+  await requireAdmin();
+
+  const promotion = readPromotionForm(formData);
+  await validatePromotionProducts(
+    promotion.productIds,
+    promotion.allProducts,
+    promotion.percentOff,
+  );
+
+  try {
+    await prisma.promotion.create({
+      data: {
+        active: promotion.active,
+        allProducts: promotion.allProducts,
+        bannerText: promotion.bannerText,
+        code: promotion.code,
+        endsAt: promotion.endsAt,
+        percentOff: promotion.percentOff,
+        products: {
+          create: promotion.productIds.map((consultationId) => ({
+            consultationId,
+          })),
+        },
+        startsAt: promotion.startsAt,
+        title: promotion.title,
+      },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new Error("Ce code promotionnel existe déjà.");
+    }
+
+    throw error;
+  }
+
+  revalidatePromotionPages();
+}
+
+export async function updatePromotion(formData: FormData) {
+  await requireAdmin();
+
+  const id = readIntegerField(formData, "id", "Promotion", { min: 1 });
+  const promotion = readPromotionForm(formData);
+  await validatePromotionProducts(
+    promotion.productIds,
+    promotion.allProducts,
+    promotion.percentOff,
+  );
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.promotionConsultation.deleteMany({
+        where: { promotionId: id },
+      });
+      await tx.promotion.update({
+        data: {
+          active: promotion.active,
+          allProducts: promotion.allProducts,
+          bannerText: promotion.bannerText,
+          code: promotion.code,
+          endsAt: promotion.endsAt,
+          percentOff: promotion.percentOff,
+          products: {
+            create: promotion.productIds.map((consultationId) => ({
+              consultationId,
+            })),
+          },
+          startsAt: promotion.startsAt,
+          title: promotion.title,
+        },
+        where: { id },
+      });
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new Error("Ce code promotionnel existe déjà.");
+    }
+
+    throw error;
+  }
+
+  revalidatePromotionPages();
+}
+
+export async function deletePromotion(formData: FormData) {
+  await requireAdmin();
+
+  const id = readIntegerField(formData, "id", "Promotion", { min: 1 });
+
+  await prisma.promotion.delete({ where: { id } });
+  revalidatePromotionPages();
 }
 
 export async function createProduct(formData: FormData) {

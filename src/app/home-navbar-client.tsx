@@ -12,10 +12,14 @@ type NavbarUser = {
 };
 
 type HomeNavbarClientProps = {
+  hasPromotion: boolean;
   user: NavbarUser | null;
 };
 
-export default function HomeNavbarClient({ user }: HomeNavbarClientProps) {
+export default function HomeNavbarClient({
+  hasPromotion,
+  user,
+}: HomeNavbarClientProps) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -72,7 +76,7 @@ export default function HomeNavbarClient({ user }: HomeNavbarClientProps) {
     <header
       className={`home-navbar fixed inset-x-0 top-0 z-50 px-5 py-3 md:px-8 lg:px-10 ${
         isScrolled ? "home-navbar-scrolled" : ""
-      }`}
+      } ${hasPromotion ? "home-navbar-with-promotion" : ""}`}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
         <Link className="flex min-w-0 items-center gap-3" href="/">

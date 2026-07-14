@@ -11,6 +11,11 @@ import { sendOrderDiscordLog } from "@/lib/discord-order-log";
 import { syncPaidBookingToGoogleCalendar } from "@/lib/google-calendar";
 import { parseInternationalPhoneNumber } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateDiscountedPriceCents,
+  isValidPromotionCode,
+  MIN_CHECKOUT_AMOUNT_CENTS,
+} from "@/lib/promotion-pricing";
 import { getStripe } from "@/lib/stripe";
 
 const MAX_MESSAGE_CHUNKS = 8;
@@ -58,6 +63,25 @@ function parseStripeDate(value: string) {
   const date = new Date(value);
 
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseMetadataInteger(
+  metadata: Record<string, string> | null,
+  key: string,
+  min: number,
+  max: number,
+) {
+  const rawValue = readMetadataValue(metadata, key);
+
+  if (!/^\d+$/.test(rawValue)) {
+    return null;
+  }
+
+  const value = Number(rawValue);
+
+  return Number.isSafeInteger(value) && value >= min && value <= max
+    ? value
+    : null;
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -109,13 +133,61 @@ export async function POST(request: Request) {
       const phoneNumber = phoneValue
         ? parseInternationalPhoneNumber(phoneValue)
         : null;
+      const originalPriceCents = parseMetadataInteger(
+        metadata,
+        "originalPriceCents",
+        MIN_CHECKOUT_AMOUNT_CENTS,
+        100_000_000,
+      );
+      const paidAmountCents = parseMetadataInteger(
+        metadata,
+        "paidAmountCents",
+        MIN_CHECKOUT_AMOUNT_CENTS,
+        100_000_000,
+      );
+      const discountPercent = parseMetadataInteger(
+        metadata,
+        "discountPercent",
+        0,
+        99,
+      );
+      const promotionCode = readMetadataValue(metadata, "promotionCode");
+      const rawPromotionId = readMetadataValue(metadata, "promotionId");
+      const promotionId = rawPromotionId
+        ? parseMetadataInteger(metadata, "promotionId", 1, 2_147_483_647)
+        : null;
 
-      if (!Number.isInteger(consultationId) || consultationId < 1 || !message) {
+      if (
+        !Number.isInteger(consultationId) ||
+        consultationId < 1 ||
+        !message ||
+        originalPriceCents === null ||
+        paidAmountCents === null ||
+        discountPercent === null
+      ) {
         return paidWebhookError("Paid Stripe session has invalid booking metadata.");
       }
 
       if (phoneValue && !phoneNumber) {
         return paidWebhookError("Paid Stripe session has an invalid phone number.");
+      }
+
+      const hasPromotion = discountPercent > 0;
+      const expectedPaidAmountCents = hasPromotion
+        ? calculateDiscountedPriceCents(originalPriceCents, discountPercent)
+        : originalPriceCents;
+
+      if (
+        expectedPaidAmountCents !== paidAmountCents ||
+        session.amount_subtotal !== paidAmountCents ||
+        session.amount_total !== paidAmountCents ||
+        session.currency !== "eur" ||
+        (hasPromotion &&
+          (!promotionId || !isValidPromotionCode(promotionCode))) ||
+        (!hasPromotion && (promotionId !== null || Boolean(promotionCode))) ||
+        (Boolean(rawPromotionId) && promotionId === null)
+      ) {
+        return paidWebhookError("Paid Stripe session has inconsistent pricing metadata.");
       }
 
       const preferredDate = parseStripeDate(
@@ -128,7 +200,6 @@ export async function POST(request: Request) {
             include: {
               consultation: {
                 select: {
-                  price: true,
                   slotDurationMinutes: true,
                   title: true,
                 },
@@ -157,7 +228,6 @@ export async function POST(request: Request) {
               disabledMonthDays: true,
               disabledWeekdays: true,
               disableFrenchHolidays: true,
-              price: true,
               slotDurationMinutes: true,
               title: true,
             },
@@ -249,17 +319,28 @@ export async function POST(request: Request) {
                 )
               : false;
             const orderStatus = alreadyPaidSlot ? "cancelled" : "confirmed";
+            const storedPromotion = promotionId
+              ? await tx.promotion.findUnique({
+                  select: { id: true },
+                  where: { id: promotionId },
+                })
+              : null;
             const booking = await tx.booking.create({
               data: {
                 consultationId,
+                discountPercent: hasPromotion ? discountPercent : null,
                 email: readMetadataValue(metadata, "email") || null,
                 firstName: readMetadataValue(metadata, "firstName") || null,
                 message,
                 name: readMetadataValue(metadata, "name") || null,
                 orderStatus,
+                originalPriceCents,
+                paidAmountCents,
                 paymentStatus: "paid",
                 phone: phoneNumber?.number ?? null,
                 preferredDate,
+                promotionCode: hasPromotion ? promotionCode : null,
+                promotionId: storedPromotion?.id ?? null,
                 stripeSessionId: session.id,
               },
             });
@@ -311,7 +392,8 @@ export async function POST(request: Request) {
               : "payé",
             phone: result.booking.phone,
             preferredDate: result.booking.preferredDate,
-            price: result.consultation.price,
+            priceCents: result.booking.paidAmountCents,
+            promotionCode: result.booking.promotionCode,
             title: result.alreadyPaidSlot
               ? "Paiement reçu - créneau déjà pris"
               : "Commande payée",

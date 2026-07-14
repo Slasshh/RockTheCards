@@ -27,6 +27,41 @@ html {
   color: #182B49;
 }
 
+.promotion-banner {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 60;
+  display: flex;
+  height: 36px;
+  align-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(24, 43, 73, 0.22);
+  background: #FFD35A;
+  color: #182B49;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.promotion-banner-track {
+  display: flex;
+  width: max-content;
+  min-width: max-content;
+  align-items: center;
+  animation: promotion-banner-scroll 28s linear infinite;
+  white-space: nowrap;
+}
+
+.promotion-banner-track > span {
+  width: max-content;
+  min-width: 100vw;
+  flex: 0 0 auto;
+  padding: 0 32px;
+  text-align: center;
+}
+
 .home-navbar {
   background: rgba(24, 43, 73, 0.76);
   border-bottom: 1px solid rgba(244, 248, 251, 0.12);
@@ -37,7 +72,12 @@ html {
     padding 260ms ease,
     background 260ms ease,
     border-color 260ms ease,
-    box-shadow 260ms ease;
+    box-shadow 260ms ease,
+    top 260ms ease;
+}
+
+.home-navbar-with-promotion {
+  top: 36px;
 }
 
 .home-navbar-scrolled {
@@ -742,6 +782,53 @@ html {
   text-transform: uppercase;
 }
 
+.products-card-discount {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  border-radius: 9999px;
+  background: #FFD35A;
+  padding: 8px 11px;
+  color: #182B49;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.products-card-promo-code {
+  width: fit-content;
+  margin-top: 18px;
+  border: 1px solid rgba(255, 211, 90, 0.72);
+  border-radius: 9999px;
+  background: rgba(255, 211, 90, 0.16);
+  padding: 6px 10px;
+  color: #182B49;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.products-card-price {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.products-card-price del {
+  margin-bottom: 6px;
+  color: #7A8C9D;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.products-card-price strong {
+  color: #182B49;
+  font-size: 1.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .products-card-action {
   border-radius: 9999px;
   background: #182B49;
@@ -862,6 +949,37 @@ html {
   font-size: clamp(1rem, 2vw, 1.55rem);
   line-height: 1.12;
   overflow-wrap: anywhere;
+}
+
+.product-detail-meta-card .product-detail-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.product-detail-price del {
+  color: #8CA4B9;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.product-detail-meta-card .product-detail-price > span {
+  display: inline;
+  color: #FFD35A;
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.product-detail-meta-card small {
+  display: block;
+  margin-top: 9px;
+  color: #BCE8F5;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .product-detail-primary-link,
@@ -1012,6 +1130,55 @@ html {
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.product-booking-promotion {
+  display: grid;
+  align-items: end;
+  gap: 14px;
+  border: 1px solid rgba(255, 211, 90, 0.68);
+  border-radius: 8px;
+  background: rgba(255, 211, 90, 0.14);
+  padding: 15px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(180px, 1.2fr);
+}
+
+.product-booking-promotion-price > span {
+  color: #705400;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.product-booking-promotion-price p {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-top: 7px;
+}
+
+.product-booking-promotion-price del {
+  color: #7A8C9D;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.product-booking-promotion-price strong {
+  color: #182B49;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.product-booking-promotion label {
+  display: grid;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.product-booking-promotion input {
   text-transform: uppercase;
 }
 
@@ -1207,6 +1374,10 @@ html {
   }
 
   .product-booking-header {
+    grid-template-columns: 1fr;
+  }
+
+  .product-booking-promotion {
     grid-template-columns: 1fr;
   }
 
@@ -2529,6 +2700,15 @@ html {
   }
 }
 
+@keyframes promotion-banner-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 @keyframes home-navbar-drop {
   from {
     opacity: 0;
@@ -2757,6 +2937,10 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .promotion-banner-track {
+    animation: none;
+  }
+
   .products-hero-card,
   .products-hero-journey::after,
   .products-hero-journey span::before {

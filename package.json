@@ -11,6 +11,7 @@
     "dev:turbo": "next dev",
     "build": "next build",
     "start": "next start -p 3030",
+    "test": "bun test",
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:format": "prisma format",

@@ -1,4 +1,5 @@
 import { formatPhoneNumberForDiscord } from "@/lib/phone-number";
+import { formatPriceFromCents } from "@/lib/promotion-pricing";
 
 type OrderWebhookPayload = {
   bookingId: number;
@@ -11,7 +12,8 @@ type OrderWebhookPayload = {
   phone?: string | null;
   paymentStatus?: string;
   preferredDate: Date | null;
-  price: number;
+  priceCents: number;
+  promotionCode?: string | null;
   title?: string;
 };
 
@@ -64,8 +66,17 @@ export async function sendOrderDiscordLog(payload: OrderWebhookPayload) {
     {
       inline: true,
       name: "Montant",
-      value: `${payload.price} EUR`,
+      value: formatPriceFromCents(payload.priceCents),
     },
+    ...(payload.promotionCode
+      ? [
+          {
+            inline: true,
+            name: "Code promo",
+            value: payload.promotionCode,
+          },
+        ]
+      : []),
     {
       inline: true,
       name: "Client",
